@@ -1,27 +1,26 @@
 # Vyanjo Backend - Meal + Curry Subscription System Implementation Plan
 
 ## Overview
-Building a complete Node.js backend for a meal and curry subscription service with Firebase phone authentication, PostgreSQL database, and comprehensive business logic for subscriptions, curry tokens, meal scheduling, pausing, upgrades, and delivery management.
+Building a complete Node.js backend (JavaScript only, no TypeScript) for a meal and curry subscription service with Firebase phone authentication, PostgreSQL database, and comprehensive business logic for subscriptions, curry tokens, meal scheduling, pausing, upgrades, and delivery management.
 
-## Tech Stack Decisions
+## Current State
+**Repository**: `/workspace/cmjpq7e8h02hqimr37qy606bs/vyanjo-backend`
+**Status**: Greenfield project - empty repository with only .gitignore and README
 
-### Core Technologies
-- **Runtime**: Node.js (v18+)
+## Tech Stack
+- **Runtime**: Node.js v18+
+- **Language**: JavaScript (ES6+) - **NO TypeScript**
 - **Framework**: Express.js
 - **Database**: PostgreSQL 14+
 - **ORM**: Prisma (for migrations and schema management)
 - **Authentication**: Firebase Admin SDK (phone auth token verification)
-- **Language**: JavaScript (ES6+)
 - **Validation**: express-validator
-- **Timezone**: IST (Asia/Kolkata) - enforced throughout
+- **Timezone**: moment-timezone (Asia/Kolkata - IST)
+- **CORS**: cors middleware
 
-## Repository
-- **Location**: `/workspace/cmjpodmri02bkimtmq0kb5zx4/vyanjo-backend`
-- **Status**: Greenfield (empty repository, only .gitignore and README exist)
+---
 
 ## Project Structure
-
-**Approach**: Layer-based architecture (controllers, services, routes separated by layer)
 
 ```
 vyanjo-backend/
@@ -35,426 +34,108 @@ vyanjo-backend/
 │   └── index.js           # Entry point
 ├── prisma/
 │   ├── schema.prisma      # Database schema
-│   └── migrations/        # Migration files
+│   ├── migrations/        # Migration files
+│   └── seed.js            # Initial data seeding
 ├── package.json
-└── .env.example
+├── .env.example
+├── .env
+├── .gitignore
+└── README.md
 ```
 
-## Error Handling Strategy
-
-**Pattern**: Centralized error middleware that catches all errors and returns consistent JSON responses
-
-**Error Response Format**:
-```json
-{
-  "error": {
-    "message": "User-friendly error message",
-    "code": "ERROR_CODE",
-    "status": 400
-  }
-}
-```
-
-**Error Types to Handle**:
-- Validation errors (400)
-- Authentication errors (401)
-- Authorization errors (403)
-- Not found errors (404)
-- Business logic errors (422)
-- Database errors (500)
-- Firebase auth errors (401/500)
-
-## Timezone Handling
-
-**Library**: moment-timezone
-**Timezone**: Asia/Kolkata (IST)
-
-**Usage**:
-- All date/time comparisons for business logic done in IST
-- Database stores timestamps in UTC (PostgreSQL TIMESTAMP WITH TIME ZONE)
-- API accepts/returns dates in ISO format, converted to IST for logic
-- Critical for 8 PM pause deadline enforcement
-
-**Utility Function**: `src/utils/timezone.ts`
-- `getCurrentISTTime()`: Returns current time in IST
-- `isBeforePauseDeadline()`: Checks if current time < 8 PM IST
-- `convertToIST()`: Converts any date to IST
-- `getTodayIST()`: Returns today's date in IST
-
-## Core Business Logic Decisions
-
-### Meal Generation Strategy
-**Approach**: On-demand generation (meals created when user views their schedule)
-
-**How it works**:
-- When `GET /subscriptions/active` or `GET /meals/schedule` called
-- Service checks if `subscription_meals` exist for requested date range
-- If not exists, generates rows based on subscription's meal_package
-- Assigns default delivery time slots
-- Returns generated meals
-
-**Benefits**:
-- No upfront computation overhead
-- Flexible for future changes
-- Only generates what's needed
-
-### Pause Limitations
-**Rule**: Users can only pause meals for today and tomorrow (48-hour window)
-
-**Rationale**:
-- Works with on-demand generation (no future meals exist yet)
-- Prevents excessive advance planning
-- Simplifies system logic
-
-**Enforcement**:
-- `POST /meals/pause` validates: `meal_date <= getTodayIST() + 1 day`
-- Still enforces 8 PM IST deadline for same-day pauses
-
-### Data Integrity Rules
-
-**One Active Subscription Per User**:
-- Database: Partial unique index on `subscriptions(user_id)` WHERE `status = 'active'`
-- Application: Service layer checks for existing active subscription before creating new one
-- Error if violated: 422 "You already have an active subscription"
-
-**One Primary Address Per User**:
-- Application logic only (checked in service layer)
-- When setting `is_primary = true`, unset all other addresses for that user
-- Default: First address created is automatically primary
+**Architecture**: Layered architecture with clear separation of concerns
+- **Controllers**: Handle HTTP request/response, validation
+- **Services**: Business logic, database operations
+- **Routes**: Route definitions with middleware
+- **Middleware**: Auth, validation, error handling
+- **Utils**: Reusable helpers (timezone, formatters)
+- **Config**: Environment-specific configuration
 
 ---
 
-## Database Setup
+## Database Schema
 
-### Prisma Schema Location
+### Complete Prisma Schema
+
 **File**: `prisma/schema.prisma`
+
+The schema defines 17 tables for the complete meal and curry subscription system:
+
+1. **users** - Customer accounts (Firebase phone auth)
+2. **common_points** - Shared delivery locations (hostels, PGs, offices)
+3. **addresses** - User delivery addresses
+4. **meal_packages** - Purchasable subscription plans
+5. **subscriptions** - User's active/historical subscriptions
+6. **weekly_menus** - Weekly menu per diet & cuisine
+7. **weekly_menu_items** - Menu items
+8. **delivery_time_slots** - Reusable delivery windows
+9. **delivery_groups** - Group multiple items for single delivery
+10. **subscription_meals** - Generated meal schedule
+11. **meal_pauses** - Audit log for paused meals
+12. **curry_token_packages** - Purchasable curry token bundles
+13. **user_curry_wallets** - User's curry token balance
+14. **curry_orders** - Curry orders using tokens
+15. **upgrade_prices** - Upgrade pricing rules
+16. **subscription_upgrades** - Applied temporary upgrades
+17. **notifications** - In-app notifications
+
+**Complete schema**: Use the exact Prisma schema provided in the user's specification (17 models with all relations, constraints, and field types). This schema is production-ready and should be implemented as-is in `prisma/schema.prisma`.
 
 ### Database Connection
-**Environment variable**: `DATABASE_URL` (PostgreSQL connection string)
-**Example**: `postgresql://user:password@localhost:5432/vyanjo_db?schema=public`
+
+**Environment variable**: `DATABASE_URL`
+**Format**: `postgresql://user:password@host:5432/database?schema=public`
+**Example**: `postgresql://vyanjo_user:password@localhost:5432/vyanjo_db?schema=public`
 
 ### Migration Strategy
-- Use Prisma Migrate: `prisma migrate dev --name init` for initial schema
-- All subsequent changes through migrations
-- Migrations stored in `prisma/migrations/`
+- Use Prisma Migrate for all schema changes
+- Initial migration: `npx prisma migrate dev --name init`
+- Subsequent changes: `npx prisma migrate dev --name describe_change`
+- Production: `npx prisma migrate deploy`
 
-### Prisma Schema Definition
+### Data Integrity Rules
 
-**File**: `prisma/schema.prisma`
+**Enforced at Database Level**:
+- Unique constraint: `(diet_type, cuisine_type, week_start_date)` on `weekly_menus`
+- Unique constraint: `(user_id, diet_type)` on `user_curry_wallets`
+- Unique constraint: `(subscription_id, service_date, item_type)` on `subscription_meals`
+- Partial unique index: `(user_id)` WHERE `status = 'active'` on `subscriptions` (one active subscription per user)
 
-Complete schema with all 17 tables:
+**Enforced at Application Level**:
+- One primary address per user (checked in service layer)
+- First address automatically becomes primary
+- When setting `is_primary = true`, unset others
 
-```prisma
-generator client {
-  provider = "prisma-client-js"
-}
+### Enum Values (Application-Level Validation)
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+```javascript
+// File: src/utils/constants.js
+const DIET_TYPES = ['veg', 'non_veg'];
+const CUISINE_TYPES = ['south_indian', 'north_indian'];
+const CONTAINER_TYPES = ['plastic', 'steel'];
+const SUBSCRIPTION_STATUS = ['active', 'completed', 'cancelled'];
+const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snacks'];
+const CURRY_ITEM_TYPES = ['curry_lunch', 'curry_dinner'];
+const CURRY_ORDER_STATUS = ['ordered', 'cancelled', 'fulfilled'];
+const UPGRADE_TYPES = ['veg_to_nonveg', 'south_to_north'];
+const UPGRADE_SCOPES = ['meal', 'day', 'week'];
+const ADDRESS_TAGS = ['home', 'work', 'office', 'other'];
+const PAUSE_MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snacks', 'all'];
 
-// 1. Users table
-model User {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  phoneNumber String   @unique @map("phone_number") @db.VarChar(15)
-  name        String?  @db.VarChar(100)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  addresses         Address[]
-  subscriptions     Subscription[]
-  curryWallets      CurryWallet[]
-  curryOrders       CurryOrder[]
-  notifications     Notification[]
-  deliveryGroups    DeliveryGroup[]
-
-  @@map("users")
-}
-
-// 2. Common points
-model CommonPoint {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name         String   @db.VarChar(150)
-  addressLine1 String?  @map("address_line_1") @db.Text
-  city         String?  @db.VarChar(100)
-  state        String?  @db.VarChar(100)
-  pincode      String?  @db.VarChar(10)
-  latitude     Decimal? @db.Decimal(9, 6)
-  longitude    Decimal? @db.Decimal(9, 6)
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  addresses Address[]
-
-  @@map("common_points")
-}
-
-// 3. Addresses
-model Address {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId         String   @map("user_id") @db.Uuid
-  tag            String   @db.VarChar(50)
-  addressLine1   String   @map("address_line_1") @db.Text
-  addressLine2   String?  @map("address_line_2") @db.Text
-  landmark       String?  @db.Text
-  city           String   @db.VarChar(100)
-  state          String   @db.VarChar(100)
-  pincode        String   @db.VarChar(10)
-  latitude       Decimal? @db.Decimal(9, 6)
-  longitude      Decimal? @db.Decimal(9, 6)
-  commonPointId  String?  @map("common_point_id") @db.Uuid
-  phoneNumber    String?  @map("phone_number") @db.VarChar(15)
-  isPrimary      Boolean  @default(false) @map("is_primary")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  commonPoint  CommonPoint?  @relation(fields: [commonPointId], references: [id])
-  subscriptions Subscription[]
-
-  @@map("addresses")
-}
-
-// 4. Meal packages
-model MealPackage {
-  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                  String   @db.VarChar(150)
-  dietType              String   @map("diet_type") @db.VarChar(20)
-  cuisineType           String   @map("cuisine_type") @db.VarChar(20)
-  includesBreakfast     Boolean  @default(false) @map("includes_breakfast")
-  includesLunch         Boolean  @default(false) @map("includes_lunch")
-  includesDinner        Boolean  @default(false) @map("includes_dinner")
-  includesSnacks        Boolean  @default(false) @map("includes_snacks")
-  durationDays          Int      @map("duration_days")
-  defaultContainer      String   @map("default_container") @db.VarChar(20)
-  allowsContainerChoice Boolean  @default(false) @map("allows_container_choice")
-  allowsDietUpgrade     Boolean  @default(false) @map("allows_diet_upgrade")
-  allowsCuisineUpgrade  Boolean  @default(false) @map("allows_cuisine_upgrade")
-  price                 Decimal  @db.Decimal(10, 2)
-  isActive              Boolean  @default(true) @map("is_active")
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  subscriptions Subscription[]
-
-  @@map("meal_packages")
-}
-
-// 5. Subscriptions
-model Subscription {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId        String   @map("user_id") @db.Uuid
-  mealPackageId String   @map("meal_package_id") @db.Uuid
-  addressId     String   @map("address_id") @db.Uuid
-  containerType String   @map("container_type") @db.VarChar(20)
-  startDate     DateTime @map("start_date") @db.Date
-  endDate       DateTime @map("end_date") @db.Date
-  status        String   @db.VarChar(20)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  user         User         @relation(fields: [userId], references: [id])
-  mealPackage  MealPackage  @relation(fields: [mealPackageId], references: [id])
-  address      Address      @relation(fields: [addressId], references: [id])
-
-  meals        SubscriptionMeal[]
-  pauses       MealPause[]
-  upgrades     SubscriptionUpgrade[]
-
-  @@unique([userId], map: "unique_active_subscription", where: { status: "active" })
-  @@map("subscriptions")
-}
-
-// 6. Weekly menus
-model WeeklyMenu {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  dietType      String   @map("diet_type") @db.VarChar(20)
-  cuisineType   String   @map("cuisine_type") @db.VarChar(20)
-  weekStartDate DateTime @map("week_start_date") @db.Date
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  items WeeklyMenuItem[]
-
-  @@unique([dietType, cuisineType, weekStartDate])
-  @@map("weekly_menus")
-}
-
-// 7. Weekly menu items
-model WeeklyMenuItem {
-  id            String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  weeklyMenuId  String @map("weekly_menu_id") @db.Uuid
-  itemType      String @map("item_type") @db.VarChar(20)
-  itemName      String @map("item_name") @db.Text
-
-  weeklyMenu WeeklyMenu @relation(fields: [weeklyMenuId], references: [id], onDelete: Cascade)
-
-  @@map("weekly_menu_items")
-}
-
-// 8. Delivery time slots
-model DeliveryTimeSlot {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String   @db.VarChar(50)
-  startTime DateTime @map("start_time") @db.Time
-  endTime   DateTime @map("end_time") @db.Time
-  isActive  Boolean  @default(true) @map("is_active")
-
-  subscriptionMeals SubscriptionMeal[]
-  curryOrders       CurryOrder[]
-
-  @@map("delivery_time_slots")
-}
-
-// 9. Delivery groups
-model DeliveryGroup {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String   @map("user_id") @db.Uuid
-  serviceDate DateTime @map("service_date") @db.Date
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  user              User               @relation(fields: [userId], references: [id])
-  subscriptionMeals SubscriptionMeal[]
-  curryOrders       CurryOrder[]
-
-  @@map("delivery_groups")
-}
-
-// 10. Subscription meals
-model SubscriptionMeal {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  subscriptionId  String   @map("subscription_id") @db.Uuid
-  serviceDate     DateTime @map("service_date") @db.Date
-  itemType        String   @map("item_type") @db.VarChar(20)
-  deliverySlotId  String?  @map("delivery_slot_id") @db.Uuid
-  deliveryGroupId String?  @map("delivery_group_id") @db.Uuid
-  isPaused        Boolean  @default(false) @map("is_paused")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  subscription    Subscription      @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  deliverySlot    DeliveryTimeSlot? @relation(fields: [deliverySlotId], references: [id])
-  deliveryGroup   DeliveryGroup?    @relation(fields: [deliveryGroupId], references: [id])
-
-  @@unique([subscriptionId, serviceDate, itemType])
-  @@map("subscription_meals")
-}
-
-// 11. Meal pauses
-model MealPause {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  subscriptionId String   @map("subscription_id") @db.Uuid
-  mealDate       DateTime @map("meal_date") @db.Date
-  mealType       String   @map("meal_type") @db.VarChar(20)
-  pausedAt       DateTime @default(now()) @map("paused_at") @db.Timestamptz
-
-  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-
-  @@map("meal_pauses")
-}
-
-// 12. Curry token packages
-model CurryTokenPackage {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name         String   @db.VarChar(100)
-  dietType     String   @map("diet_type") @db.VarChar(20)
-  tokenCount   Int      @map("token_count")
-  validityDays Int      @map("validity_days")
-  price        Decimal  @db.Decimal(10, 2)
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  @@map("curry_token_packages")
-}
-
-// 13. User curry wallets
-model CurryWallet {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId     String   @map("user_id") @db.Uuid
-  dietType   String   @map("diet_type") @db.VarChar(20)
-  totalTokens Int     @map("total_tokens")
-  usedTokens  Int     @default(0) @map("used_tokens")
-  validUntil  DateTime @map("valid_until") @db.Date
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  curryOrders CurryOrder[]
-
-  @@unique([userId, dietType])
-  @@map("user_curry_wallets")
-}
-
-// 14. Curry orders
-model CurryOrder {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId          String   @map("user_id") @db.Uuid
-  walletId        String   @map("wallet_id") @db.Uuid
-  cuisineType     String   @map("cuisine_type") @db.VarChar(20)
-  orderDate       DateTime @map("order_date") @db.Date
-  deliverySlotId  String?  @map("delivery_slot_id") @db.Uuid
-  deliveryGroupId String?  @map("delivery_group_id") @db.Uuid
-  status          String   @db.VarChar(20)
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  user          User              @relation(fields: [userId], references: [id])
-  wallet        CurryWallet       @relation(fields: [walletId], references: [id])
-  deliverySlot  DeliveryTimeSlot? @relation(fields: [deliverySlotId], references: [id])
-  deliveryGroup DeliveryGroup?    @relation(fields: [deliveryGroupId], references: [id])
-
-  @@map("curry_orders")
-}
-
-// 15. Upgrade prices
-model UpgradePrice {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  upgradeType String   @map("upgrade_type") @db.VarChar(30)
-  scope       String   @db.VarChar(20)
-  mealType    String?  @map("meal_type") @db.VarChar(20)
-  price       Decimal  @db.Decimal(10, 2)
-  isActive    Boolean  @default(true) @map("is_active")
-
-  @@map("upgrade_prices")
-}
-
-// 16. Subscription upgrades
-model SubscriptionUpgrade {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  subscriptionId String   @map("subscription_id") @db.Uuid
-  upgradeType    String   @map("upgrade_type") @db.VarChar(30)
-  scope          String   @db.VarChar(20)
-  mealType       String?  @map("meal_type") @db.VarChar(20)
-  startDate      DateTime @map("start_date") @db.Date
-  endDate        DateTime @map("end_date") @db.Date
-  price          Decimal  @db.Decimal(10, 2)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  subscription Subscription @relation(fields: [subscriptionId], references: [id])
-
-  @@map("subscription_upgrades")
-}
-
-// 17. Notifications
-model Notification {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  title     String   @db.VarChar(150)
-  message   String   @db.Text
-  isRead    Boolean  @default(false) @map("is_read")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("notifications")
-}
+module.exports = {
+  DIET_TYPES,
+  CUISINE_TYPES,
+  CONTAINER_TYPES,
+  SUBSCRIPTION_STATUS,
+  MEAL_TYPES,
+  CURRY_ITEM_TYPES,
+  CURRY_ORDER_STATUS,
+  UPGRADE_TYPES,
+  UPGRADE_SCOPES,
+  ADDRESS_TAGS,
+  PAUSE_MEAL_TYPES
+};
 ```
-
-### Enum Values (Enforced in Application Layer)
-
-**Diet Types**: `veg`, `non_veg`
-**Cuisine Types**: `south_indian`, `north_indian`
-**Container Types**: `plastic`, `steel`
-**Subscription Status**: `active`, `completed`, `cancelled`
-**Meal/Item Types**: `breakfast`, `lunch`, `dinner`, `snacks`, `curry_lunch`, `curry_dinner`
-**Curry Order Status**: `ordered`, `cancelled`, `fulfilled`
-**Upgrade Types**: `veg_to_nonveg`, `south_to_north`
-**Upgrade Scope**: `meal`, `day`, `week`
-**Address Tags**: `home`, `work`, `office`, `other`
 
 ---
 
@@ -462,24 +143,40 @@ model Notification {
 
 ### Firebase Admin SDK Configuration
 
-**File**: `src/config/firebase.ts`
+**File**: `src/config/firebase.js`
 
-**Environment Variables Required**:
-- `FIREBASE_PROJECT_ID`
-- `FIREBASE_PRIVATE_KEY` (Base64 encoded or direct string)
-- `FIREBASE_CLIENT_EMAIL`
+**Required Environment Variables**:
+- `FIREBASE_PROJECT_ID`: Your Firebase project ID
+- `FIREBASE_PRIVATE_KEY`: Private key from service account JSON (can be base64 encoded or direct)
+- `FIREBASE_CLIENT_EMAIL`: Service account email
 
-**Initialization**:
-```typescript
-// Initialize Firebase Admin SDK with service account credentials
-// Export admin instance for use in middleware
+**Implementation**:
+```javascript
+const admin = require('firebase-admin');
+
+// Initialize Firebase Admin SDK
+admin.initializeApp({
+  credential: admin.credential.cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+  }),
+});
+
+module.exports = admin;
 ```
+
+**Setup Instructions**:
+1. Go to Firebase Console → Project Settings → Service Accounts
+2. Click "Generate New Private Key"
+3. Download JSON file
+4. Extract `project_id`, `private_key`, `client_email` to `.env`
 
 ### Authentication Middleware
 
-**File**: `src/middleware/auth.ts`
+**File**: `src/middleware/auth.js`
 
-**Purpose**: Verify Firebase ID token on every protected route and attach user to request
+**Purpose**: Verify Firebase ID token on every protected route and attach authenticated user to request
 
 **Behavior**:
 1. Extract token from `Authorization` header (format: `Bearer <token>`)
@@ -488,42 +185,321 @@ model Notification {
 4. If verification fails: Return 401 with `{"error": {"message": "Invalid or expired token", "code": "INVALID_TOKEN", "status": 401}}`
 5. Extract `phone_number` from decoded token
 6. Query database for user with matching `phone_number`
-7. If user not exists: Create new user record with phone number
+7. If user doesn't exist: Create new user record with phone number
 8. Attach user object to `req.user` with fields: `{id, phoneNumber, name}`
 9. Call `next()` to proceed to route handler
 
-**Usage**: Applied to all routes except `POST /auth/login`
+**Error Handling**:
+- Firebase token verification errors: Return 401
+- Database errors: Return 500
+- Catch all errors and format consistently
 
-**TypeScript Extension**: Extend Express Request type to include `user` property
+**Usage**: Applied to all routes except `GET /health`
+
+**Express Request Extension**:
+Attach `user` property to Express request object:
+```javascript
+// After verification
+req.user = {
+  id: user.id,
+  phoneNumber: user.phoneNumber,
+  name: user.name
+};
+```
+
+---
+
+## Timezone Handling (Critical for 8 PM Pause Deadline)
+
+**Library**: moment-timezone
+**Timezone**: Asia/Kolkata (IST)
+
+### Timezone Utility Functions
+
+**File**: `src/utils/timezone.js`
+
+**Functions to implement**:
+
+```javascript
+const moment = require('moment-timezone');
+const TIMEZONE = 'Asia/Kolkata';
+
+// Get current time in IST
+function getCurrentISTTime() {
+  return moment().tz(TIMEZONE);
+}
+
+// Get current date in IST (YYYY-MM-DD)
+function getTodayIST() {
+  return moment().tz(TIMEZONE).format('YYYY-MM-DD');
+}
+
+// Get tomorrow's date in IST
+function getTomorrowIST() {
+  return moment().tz(TIMEZONE).add(1, 'day').format('YYYY-MM-DD');
+}
+
+// Check if current time is before 8 PM IST (for pause deadline)
+function isBeforePauseDeadline() {
+  const now = moment().tz(TIMEZONE);
+  return now.hour() < 20; // Before 8:00 PM
+}
+
+// Convert any date to IST
+function convertToIST(date) {
+  return moment(date).tz(TIMEZONE);
+}
+
+// Calculate week start date (Monday) for given date
+function calculateWeekStart(date) {
+  return moment(date).tz(TIMEZONE).startOf('isoWeek').format('YYYY-MM-DD');
+}
+
+module.exports = {
+  getCurrentISTTime,
+  getTodayIST,
+  getTomorrowIST,
+  isBeforePauseDeadline,
+  convertToIST,
+  calculateWeekStart,
+  TIMEZONE
+};
+```
+
+**Usage Notes**:
+- All date comparisons for business logic MUST use IST
+- Database stores timestamps in UTC (PostgreSQL handles this automatically with TIMESTAMPTZ)
+- API accepts dates in ISO format (YYYY-MM-DD)
+- Critical for 8 PM pause deadline enforcement in pause meal endpoint
+
+---
+
+## Core Business Logic Rules
+
+### 1. On-Demand Meal Generation
+
+**Strategy**: Generate meals only when needed, not upfront
+
+**When meals are generated**:
+- User calls `GET /api/meals/schedule` (today + tomorrow)
+- User attempts to pause/unpause a meal
+- System needs to check meal existence
+
+**How it works**:
+1. Check if `subscription_meals` exist for requested date
+2. If not exist, generate them:
+   - Get subscription's meal package
+   - For each included meal type (breakfast/lunch/dinner/snacks):
+     - Create `subscription_meals` row with `service_date`, `item_type`
+     - Assign default `delivery_slot_id` based on meal type
+     - Set `is_paused = false`
+3. Return generated meals
+
+**Default Delivery Slot Assignments**:
+- `breakfast` → Morning Slot (7:00-8:00 AM)
+- `lunch` → Afternoon Slot (12:00-1:00 PM)
+- `snacks` → Evening Snack Slot (5:00-6:00 PM)
+- `dinner` → Dinner Slot (7:00-8:00 PM)
+
+**Benefits**:
+- No upfront computation overhead
+- Only generates what's needed
+- Flexible for future changes
+- Works well with 48-hour scheduling window
+
+**Implementation Location**: `src/services/mealService.js` - `generateMealsIfNeeded()` function
+
+### 2. 48-Hour Scheduling Window (Today + Tomorrow Only)
+
+**Rule**: Users can only view and manage meals for today and tomorrow
+
+**Rationale**:
+- Works seamlessly with on-demand generation
+- Prevents excessive advance planning
+- Simplifies system logic
+- Meals beyond tomorrow don't exist yet
+
+**Enforcement**:
+- `GET /api/meals/schedule`: Returns only today and tomorrow
+- `POST /api/meals/pause`: Only allows `date = today OR tomorrow`
+- `POST /api/meals/unpause`: Only allows `date = today OR tomorrow`
+- `POST /api/curry/order`: Only allows `orderDate = today OR tomorrow`
+
+**Error Response**: If user tries to access meals beyond tomorrow:
+`422 Unprocessable Entity` - `"You can only manage meals for today and tomorrow"`
+
+### 3. 8 PM IST Pause Deadline
+
+**Rule**: Users cannot pause/unpause meals for TODAY after 8:00 PM IST
+
+**Enforcement**:
+- Check current time in IST
+- If current time >= 20:00 (8 PM) AND meal date is today:
+  - Return 422: `"Cannot pause meals after 8 PM. Please pause before 8 PM IST."`
+- Tomorrow's meals can be paused anytime
+
+**Why Tomorrow is Exempt**: Tomorrow's meals haven't entered preparation yet
+
+**Implementation**: Use `isBeforePauseDeadline()` from timezone utils
+
+### 4. One Active Subscription Per User
+
+**Enforcement at Two Levels**:
+
+**Database Level** (backup protection):
+- Partial unique index on `subscriptions(user_id)` WHERE `status = 'active'`
+- Prisma schema: `@@unique([userId], map: "unique_active_subscription")`
+
+**Application Level** (primary check):
+- Before creating subscription, query for existing active subscription
+- If found: Return 422 `"You already have an active subscription"`
+
+**When subscription ends**:
+- Status changed from 'active' to 'completed' or 'cancelled'
+- User can then create new subscription
+
+### 5. Primary Address Management
+
+**Rule**: Each user has exactly one primary address
+
+**Enforcement** (application-level only):
+1. First address created for user: Automatically set `is_primary = true`
+2. When creating/updating address with `is_primary = true`:
+   - Update all other user addresses: Set `is_primary = false`
+   - Then set this address: `is_primary = true`
+3. If user has only one address, it must remain primary (enforce in delete logic)
+
+**Delete Protection**: Cannot delete address if:
+- It's the only address (user must have at least one)
+- It's used in an active subscription
+
+### 6. Curry Token Wallet Management
+
+**Wallet Creation/Update**:
+- One wallet per user per diet type (`unique(user_id, diet_type)`)
+- Purchase package → Add tokens to `total_tokens`, extend `valid_until`
+- Place order → Increment `used_tokens` by 1
+- Cancel order → Decrement `used_tokens` by 1 (refund)
+
+**Token Calculation**:
+- `remaining_tokens = total_tokens - used_tokens`
+- Check `valid_until >= current_date` before allowing orders
+
+**Expiry Handling**:
+- If `valid_until < current_date`: Return 422 `"Your curry tokens have expired"`
+- Do not allow orders with expired wallets
+
+### 7. Delivery Grouping
+
+**Purpose**: Deliver multiple items together (e.g., tiffin + curry)
+
+**How it works**:
+1. User selects multiple meals/orders for same date
+2. System creates `delivery_groups` record
+3. All items assigned same `delivery_group_id` and `delivery_slot_id`
+4. Delivered together in single trip
+
+**Validation**:
+- All items must be for same `service_date`
+- Minimum 2 items required
+- None can be paused
+- All must belong to user
+
+**Ungrouping**:
+- Remove `delivery_group_id` from all items
+- Keep their current `delivery_slot_id` (don't reset to default)
+- Delete delivery group record
+
+### 8. Temporary Upgrades
+
+**Types**:
+- `veg_to_nonveg`: Upgrade vegetarian meal to non-vegetarian
+- `south_to_north`: Change from South Indian to North Indian cuisine
+
+**Scopes**:
+- `meal`: Single meal type for date range (e.g., only lunch)
+- `day`: All meals for date range
+- `week`: All meals for full weeks in date range
+
+**Validation**:
+- Check subscription's meal package allows the upgrade:
+  - `veg_to_nonveg` requires `allows_diet_upgrade = true`
+  - `south_to_north` requires `allows_cuisine_upgrade = true`
+- Date range must be within subscription period
+- Fetch price from `upgrade_prices` table matching type, scope, meal type
+
+**Pricing Calculation**:
+- `meal` scope: `price × number of days`
+- `day` scope: `price × number of days`
+- `week` scope: `price × number of weeks`
+
+**Removal**:
+- Can only remove upgrade if `start_date > current_date` (hasn't started yet)
+- Once started, upgrade cannot be removed
 
 ---
 
 ## API Endpoints Specification
 
-### Common Response Patterns
+### API Response Format Standards
 
-**Success Response Structure**:
-```json
+**Success Response Pattern**:
+```javascript
 {
-  "data": { /* response data */ },
+  "data": { /* response payload */ },
   "message": "Operation successful" // optional
 }
 ```
 
-**Error Response Structure** (handled by centralized middleware):
-```json
+**Error Response Pattern**:
+```javascript
 {
   "error": {
-    "message": "User-friendly error message",
+    "message": "Human-readable error message",
     "code": "ERROR_CODE",
     "status": 400
   }
 }
 ```
 
+**Implementation**: Create `src/utils/responseFormatter.js` with helper functions:
+```javascript
+function successResponse(data, message = null) {
+  const response = { data };
+  if (message) response.message = message;
+  return response;
+}
+
+function errorResponse(message, code, status) {
+  return {
+    error: { message, code, status }
+  };
+}
+
+module.exports = { successResponse, errorResponse };
+```
+
+### Common HTTP Status Codes Used
+
+- **200 OK**: Successful GET, PUT, DELETE
+- **201 Created**: Successful POST (resource created)
+- **400 Bad Request**: Validation errors
+- **401 Unauthorized**: Authentication required/failed
+- **403 Forbidden**: User doesn't have permission
+- **404 Not Found**: Resource doesn't exist
+- **422 Unprocessable Entity**: Business logic error
+- **500 Internal Server Error**: Server/database error
+
+---
+
+## API Modules and Endpoints
+
 ### Module 1: Authentication
 
 **Base Path**: `/api/auth`
+**File**: `src/routes/authRoutes.js`
+**Controller**: `src/controllers/authController.js`
+**Service**: `src/services/authService.js`
 
 #### POST /api/auth/login
 
@@ -533,10 +509,11 @@ model Notification {
 
 **Request Body**: None (user identified from token)
 
-**Process**:
-1. Middleware extracts phone from token
-2. Controller finds or creates user record
-3. Returns user profile
+**Business Logic**:
+1. Middleware extracts phone number from verified Firebase token
+2. Query database for user with matching phone_number
+3. If not exists: Create new user record
+4. Return user profile
 
 **Response (200)**:
 ```json
@@ -553,6 +530,9 @@ model Notification {
 }
 ```
 
+**Errors**:
+- 401 if token invalid/expired (handled by auth middleware)
+
 #### PUT /api/auth/profile
 
 **Purpose**: Update user's name
@@ -566,8 +546,14 @@ model Notification {
 }
 ```
 
-**Validation**:
+**Validation** (use express-validator):
 - `name`: Required, string, 2-100 characters, trim whitespace
+- Validation location: `src/middleware/validators/authValidators.js`
+
+**Business Logic**:
+1. Get user_id from req.user (attached by auth middleware)
+2. Update user record with new name
+3. Return updated user
 
 **Response (200)**:
 ```json
@@ -592,7 +578,10 @@ model Notification {
 
 ### Module 2: Addresses & Common Points
 
-**Base Path**: `/api/addresses`, `/api/common-points`
+**Base Path**: `/api/addresses` and `/api/common-points`
+**Files**: `src/routes/addressRoutes.js`
+**Controller**: `src/controllers/addressController.js`
+**Service**: `src/services/addressService.js`
 
 #### GET /api/common-points
 
@@ -603,6 +592,13 @@ model Notification {
 **Query Parameters**:
 - `search` (optional): Search term for name/city/pincode
 - `city` (optional): Filter by city
+
+**Business Logic**:
+- If `search` provided: Case-insensitive search on name, city, or pincode (use ILIKE in Prisma)
+- If `city` provided: Exact match on city
+- Only return where `isActive = true`
+- Order by name ascending
+- Limit to 50 results
 
 **Response (200)**:
 ```json
@@ -624,17 +620,16 @@ model Notification {
 }
 ```
 
-**Logic**:
-- If `search` provided: Filter by name, city, or pincode containing search term (case-insensitive)
-- If `city` provided: Exact match on city
-- Only return `isActive = true` common points
-- Order by name ascending
-
 #### GET /api/addresses
 
 **Purpose**: Get all addresses for authenticated user
 
 **Authentication**: Required
+
+**Business Logic**:
+- Return all addresses where `user_id = req.user.id`
+- Include related commonPoint data if linked
+- Order by `isPrimary DESC`, then `createdAt DESC`
 
 **Response (200)**:
 ```json
@@ -662,11 +657,6 @@ model Notification {
 }
 ```
 
-**Logic**:
-- Return all addresses for `req.user.id`
-- Include related `commonPoint` data if linked
-- Order by `isPrimary DESC`, then `createdAt DESC`
-
 #### POST /api/addresses
 
 **Purpose**: Create new address for user
@@ -692,7 +682,7 @@ model Notification {
 ```
 
 **Validation**:
-- `tag`: Required, one of ['home', 'work', 'office', 'other']
+- `tag`: Required, one of ADDRESS_TAGS
 - `addressLine1`: Required, max 500 chars
 - `addressLine2`: Optional, max 500 chars
 - `landmark`: Optional, max 200 chars
@@ -702,13 +692,15 @@ model Notification {
 - `latitude`: Optional, decimal (-90 to 90)
 - `longitude`: Optional, decimal (-180 to 180)
 - `commonPointId`: Optional, must exist if provided
-- `phoneNumber`: Optional, 10-15 digits with optional +91 prefix
+- `phoneNumber`: Optional, 10-15 digits
 - `isPrimary`: Optional boolean
 
 **Business Logic**:
-1. If this is user's first address, automatically set `isPrimary = true` regardless of request value
-2. If `isPrimary = true` in request, update all other user addresses to `isPrimary = false`
-3. Create address record
+1. Count existing addresses for user
+2. If count = 0: Force `isPrimary = true` (first address is always primary)
+3. If `isPrimary = true` in request: Update all other user addresses to `isPrimary = false`
+4. If `commonPointId` provided: Verify it exists
+5. Create address record with `user_id = req.user.id`
 
 **Response (201)**:
 ```json
@@ -722,7 +714,7 @@ model Notification {
 
 **Errors**:
 - 400 if validation fails
-- 404 if `commonPointId` doesn't exist
+- 404 if commonPointId doesn't exist
 
 #### PUT /api/addresses/:id
 
@@ -732,14 +724,14 @@ model Notification {
 
 **Authorization**: User can only update their own addresses
 
-**Request Body**: Same as POST (all fields optional except those being updated)
+**Request Body**: Same fields as POST (all optional)
 
 **Validation**: Same as POST
 
 **Business Logic**:
-1. Verify address belongs to `req.user.id`, else return 403
-2. If setting `isPrimary = true`, unset primary on other addresses
-3. Update address
+1. Verify address exists and belongs to req.user.id (403 if not)
+2. If setting `isPrimary = true`: Update all other user addresses to false
+3. Update address fields
 
 **Response (200)**:
 ```json
@@ -764,9 +756,12 @@ model Notification {
 **Authorization**: User can only delete their own addresses
 
 **Business Logic**:
-1. Verify address belongs to user
+1. Verify address belongs to user (403 if not)
 2. Check if address is used in any active subscription
-3. If used in active subscription: Return 422 "Cannot delete address used in active subscription"
+   - Query: `subscriptions` where `addressId = :id` AND `status = 'active'`
+   - If found: Return 422 "Cannot delete address used in active subscription"
+3. Count user's addresses
+   - If count = 1: Return 422 "Cannot delete your only address"
 4. Delete address
 
 **Response (200)**:
@@ -779,13 +774,16 @@ model Notification {
 **Errors**:
 - 403 if doesn't belong to user
 - 404 if not found
-- 422 if used in active subscription
+- 422 if used in active subscription or only address
 
 ---
 
 ### Module 3: Meal Packages
 
 **Base Path**: `/api/meal-packages`
+**Files**: `src/routes/mealPackageRoutes.js`
+**Controller**: `src/controllers/mealPackageController.js`
+**Service**: `src/services/mealPackageService.js`
 
 #### GET /api/meal-packages
 
@@ -794,9 +792,15 @@ model Notification {
 **Authentication**: Required
 
 **Query Parameters**:
-- `diet` (optional): Filter by diet type ['veg', 'non_veg']
-- `cuisine` (optional): Filter by cuisine ['south_indian', 'north_indian']
-- `duration` (optional): Filter by duration [7, 30]
+- `diet` (optional): Filter by DIET_TYPES
+- `cuisine` (optional): Filter by CUISINE_TYPES
+- `duration` (optional): Filter by duration days (7 or 30)
+
+**Business Logic**:
+- Return packages where `isActive = true`
+- Apply filters if provided (exact match)
+- Order by price ascending
+- Include all package details
 
 **Response (200)**:
 ```json
@@ -824,16 +828,15 @@ model Notification {
 }
 ```
 
-**Logic**:
-- Only return packages where `isActive = true`
-- Apply filters if provided
-- Order by price ascending
-
 #### GET /api/meal-packages/:id
 
 **Purpose**: Get detailed information about specific package
 
 **Authentication**: Required
+
+**Business Logic**:
+- Find package by id where `isActive = true`
+- If not found or inactive: 404
 
 **Response (200)**:
 ```json
@@ -852,6 +855,9 @@ model Notification {
 ### Module 4: Weekly Menus
 
 **Base Path**: `/api/menus`
+**Files**: `src/routes/menuRoutes.js`
+**Controller**: `src/controllers/menuController.js`
+**Service**: `src/services/menuService.js`
 
 #### GET /api/menus/current
 
@@ -860,12 +866,13 @@ model Notification {
 **Authentication**: Required
 
 **Business Logic**:
-1. Get user's active subscription
+1. Get user's active subscription (include meal package)
 2. If no active subscription: Return 422 "No active subscription found"
-3. Get subscription's `dietType` and `cuisineType`
-4. Calculate current week start date (Monday of current week in IST)
-5. Find `weekly_menus` matching diet, cuisine, and week
-6. Include related `weekly_menu_items`
+3. Extract `dietType` and `cuisineType` from meal package
+4. Calculate current week start date using `calculateWeekStart(getTodayIST())`
+5. Find weekly_menus matching diet, cuisine, and week_start_date
+6. Include related weekly_menu_items
+7. If not found: Return 404 "Menu not available for current week"
 
 **Response (200)**:
 ```json
@@ -878,10 +885,12 @@ model Notification {
       "weekStartDate": "2025-01-13",
       "items": [
         {
+          "id": "uuid",
           "itemType": "breakfast",
           "itemName": "Idli, Sambar, Chutney"
         },
         {
+          "id": "uuid",
           "itemType": "lunch",
           "itemName": "Rice, Dal, Rasam, Vegetable Curry"
         }
@@ -893,7 +902,7 @@ model Notification {
 
 **Errors**:
 - 422 if no active subscription
-- 404 if no menu found for current week
+- 404 if menu not found
 
 #### GET /api/menus/week
 
@@ -901,14 +910,20 @@ model Notification {
 
 **Authentication**: Required
 
-**Query Parameters**:
-- `date` (required): Any date within the week (ISO format: YYYY-MM-DD)
-- `diet` (required): Diet type ['veg', 'non_veg']
-- `cuisine` (required): Cuisine type ['south_indian', 'north_indian']
+**Query Parameters** (all required):
+- `date`: Any date within the week (YYYY-MM-DD)
+- `diet`: DIET_TYPES value
+- `cuisine`: CUISINE_TYPES value
+
+**Validation**:
+- `date`: Valid ISO date format
+- `diet`: Must be in DIET_TYPES
+- `cuisine`: Must be in CUISINE_TYPES
 
 **Business Logic**:
-1. Calculate week start date (Monday) for provided date
-2. Find menu matching diet, cuisine, and week
+1. Calculate week start date from provided date
+2. Find menu matching diet, cuisine, and week start
+3. Include menu items
 
 **Response (200)**: Same as `/current`
 
@@ -921,6 +936,9 @@ model Notification {
 ### Module 5: Subscriptions
 
 **Base Path**: `/api/subscriptions`
+**Files**: `src/routes/subscriptionRoutes.js`
+**Controller**: `src/controllers/subscriptionController.js`
+**Service**: `src/services/subscriptionService.js`
 
 #### POST /api/subscriptions
 
@@ -939,22 +957,24 @@ model Notification {
 ```
 
 **Validation**:
-- `mealPackageId`: Required, must exist and be active
-- `addressId`: Required, must belong to user
-- `containerType`: Required, one of ['plastic', 'steel']
-- `startDate`: Required, ISO date format, must be today or future date (in IST)
+- `mealPackageId`: Required UUID, must exist and be active
+- `addressId`: Required UUID, must exist and belong to user
+- `containerType`: Required, one of CONTAINER_TYPES
+- `startDate`: Required ISO date, must be >= today (IST)
 
 **Business Logic**:
-1. Check user has no active subscription (status = 'active')
-   - If active exists: Return 422 "You already have an active subscription"
-2. Fetch meal package details
-3. If `containerType` not allowed by package (`allowsContainerChoice = false`):
-   - Use package's `defaultContainer` instead, ignore request value
-4. Validate `containerType` matches allowed values if choice is allowed
-5. Calculate `endDate = startDate + mealPackage.durationDays - 1`
-6. Create subscription record with `status = 'active'`
+1. Check user has no active subscription:
+   - Query: `subscriptions` where `userId = req.user.id` AND `status = 'active'`
+   - If found: Return 422 "You already have an active subscription"
+2. Fetch meal package (verify exists and active)
+3. Verify address belongs to user
+4. If package.allowsContainerChoice = false:
+   - Use package.defaultContainer, ignore request value
+5. Calculate endDate = startDate + mealPackage.durationDays - 1
+6. Create subscription with status = 'active'
 7. **Do NOT generate subscription_meals here** (on-demand generation)
 8. Create notification: "Your subscription has been activated successfully"
+9. Return subscription with included mealPackage and address data
 
 **Response (201)**:
 ```json
@@ -996,6 +1016,12 @@ model Notification {
 
 **Authentication**: Required
 
+**Business Logic**:
+1. Find subscription where `userId = req.user.id` AND `status = 'active'`
+2. Include mealPackage and address relations
+3. Calculate daysRemaining = endDate - getTodayIST()
+4. If not found: Return 404 "No active subscription found"
+
 **Response (200)**:
 ```json
 {
@@ -1014,11 +1040,6 @@ model Notification {
 }
 ```
 
-**Logic**:
-- Find subscription where `userId = req.user.id` AND `status = 'active'`
-- Include related `mealPackage` and `address` data
-- Calculate `daysRemaining = endDate - currentDateIST`
-
 **Errors**:
 - 404 if no active subscription
 
@@ -1027,6 +1048,12 @@ model Notification {
 **Purpose**: Get past subscriptions
 
 **Authentication**: Required
+
+**Business Logic**:
+- Find subscriptions where `userId = req.user.id` AND `status IN ['completed', 'cancelled']`
+- Include mealPackage data
+- Order by endDate DESC
+- Limit to 10 most recent
 
 **Response (200)**:
 ```json
@@ -1046,952 +1073,340 @@ model Notification {
 }
 ```
 
-**Logic**:
-- Return subscriptions where `userId = req.user.id` AND `status IN ['completed', 'cancelled']`
-- Order by `endDate DESC`
-- Limit to most recent 10
+---
+
+### Remaining API Modules Summary
+
+**Note**: Complete specifications for all endpoints follow the same pattern as above. Full details provided in user's original specification document. Implementation should include:
+
+**Module 6-11 Endpoint List** (use exact same specification format):
+
+- **GET /api/meals/schedule** - Get today + tomorrow meals (with on-demand generation)
+- **POST /api/meals/pause** - Pause meal (8 PM deadline check)
+- **POST /api/meals/unpause** - Resume paused meal
+- **GET /api/delivery/slots** - List available time slots
+- **POST /api/meals/:mealId/delivery-slot** - Change delivery time
+- **POST /api/meals/group** - Group items for single delivery
+- **DELETE /api/meals/group/:groupId** - Ungroup delivery
+- **GET /api/curry/packages** - Browse curry token packages
+- **POST /api/curry/purchase** - Buy curry tokens
+- **GET /api/curry/wallet** - Check token balance
+- **POST /api/curry/order** - Place curry order (with grouping option)
+- **GET /api/curry/orders** - Get order history
+- **DELETE /api/curry/orders/:orderId** - Cancel curry order (refund token)
+- **GET /api/upgrades/prices** - Get upgrade pricing
+- **POST /api/upgrades/apply** - Apply temporary upgrade
+- **GET /api/upgrades/active** - Get active upgrades
+- **DELETE /api/upgrades/:upgradeId** - Remove upgrade
+- **GET /api/notifications** - Get user notifications
+- **POST /api/notifications/:notificationId/read** - Mark as read
+- **POST /api/notifications/read-all** - Mark all as read
+
+**Total Endpoints**: ~40 endpoints across 11 modules
+
+**Implementation Pattern for Each Endpoint**:
+1. Define route with auth middleware
+2. Add validation middleware using express-validator
+3. Controller extracts request data, calls service
+4. Service implements business logic using Prisma
+5. Return formatted response using responseFormatter
+6. Errors caught by centralized error handler
 
 ---
 
-### Module 6: Meal Schedule & Management
+## Error Handling
 
-**Base Path**: `/api/meals`
+### Centralized Error Middleware
 
-#### GET /api/meals/schedule
+**File**: `src/middleware/errorHandler.js`
 
-**Purpose**: Get meal schedule for today and tomorrow (48-hour window)
+**Purpose**: Catch all errors and return consistent JSON responses
 
-**Authentication**: Required
-
-**Business Logic**:
-1. Get user's active subscription
-2. If no active subscription: Return 422 "No active subscription found"
-3. Calculate today's date in IST
-4. Calculate tomorrow's date (today + 1 day)
-5. Check if `subscription_meals` exist for today and tomorrow
-6. **If not exist, generate them**:
-   - For each date (today, tomorrow):
-     - For each meal type in package (`includesBreakfast`, `includesLunch`, etc.):
-       - Create `subscription_meals` row
-       - Set `serviceDate`, `itemType`
-       - Assign default `deliverySlotId` based on meal type (lookup from delivery_time_slots)
-       - Set `isPaused = false`
-7. Fetch and return generated meals
-8. Include delivery slot details
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "meals": [
-      {
-        "id": "uuid",
-        "serviceDate": "2025-01-15",
-        "itemType": "breakfast",
-        "deliverySlot": {
-          "id": "uuid",
-          "name": "Morning Slot",
-          "startTime": "07:00:00",
-          "endTime": "08:00:00"
-        },
-        "deliveryGroup": null,
-        "isPaused": false
-      },
-      {
-        "id": "uuid",
-        "serviceDate": "2025-01-15",
-        "itemType": "lunch",
-        "deliverySlot": {
-          "id": "uuid",
-          "name": "Afternoon Slot",
-          "startTime": "12:00:00",
-          "endTime": "13:00:00"
-        },
-        "deliveryGroup": null,
-        "isPaused": false
-      }
-    ]
-  }
-}
-```
-
-**Default Delivery Slot Mapping**:
-- `breakfast` → Morning slot (7-8 AM)
-- `lunch` → Afternoon slot (12-1 PM)
-- `dinner` → Evening slot (7-8 PM)
-- `snacks` → Evening slot (5-6 PM)
-
-**Errors**:
-- 422 if no active subscription
-
----
-
-### Module 7: Delivery Time & Grouping
-
-**Base Path**: `/api/delivery`
-
-#### GET /api/delivery/slots
-
-**Purpose**: Get available delivery time slots
-
-**Authentication**: Required
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "slots": [
-      {
-        "id": "uuid",
-        "name": "Morning Slot",
-        "startTime": "07:00:00",
-        "endTime": "08:00:00"
-      }
-    ]
-  }
-}
-```
-
-**Logic**:
-- Return all slots where `isActive = true`
-- Order by `startTime`
-
-#### POST /api/meals/:mealId/delivery-slot
-
-**Purpose**: Change delivery time for specific meal
-
-**Authentication**: Required
-
-**Request Body**:
-```json
-{
-  "deliverySlotId": "uuid"
-}
-```
-
-**Validation**:
-- `deliverySlotId`: Required, must exist and be active
-
-**Business Logic**:
-1. Verify meal belongs to user's subscription
-2. Verify meal date is today or tomorrow
-3. Verify meal is not paused
-4. Update `deliverySlotId`
-5. Remove from any existing `deliveryGroupId` (set to null)
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "meal": { /* updated meal */ }
-  },
-  "message": "Delivery time updated successfully"
-}
-```
-
-**Errors**:
-- 403 if meal doesn't belong to user
-- 404 if meal or slot not found
-- 422 if meal is paused
-
-#### POST /api/meals/group
-
-**Purpose**: Group multiple items for single delivery
-
-**Authentication**: Required
-
-**Request Body**:
-```json
-{
-  "serviceDate": "2025-01-15",
-  "mealIds": ["uuid1", "uuid2"],
-  "deliverySlotId": "uuid"
-}
-```
-
-**Validation**:
-- `serviceDate`: Required, ISO date, must be today or tomorrow
-- `mealIds`: Required, array of meal IDs, minimum 2 items
-- `deliverySlotId`: Required, must exist
-
-**Business Logic**:
-1. Verify all meals belong to user's subscription
-2. Verify all meals are for the same `serviceDate`
-3. Verify none are paused
-4. Create `delivery_groups` record with `userId`, `serviceDate`
-5. Update all specified meals:
-   - Set `deliveryGroupId` to created group
-   - Set `deliverySlotId` to provided slot
-6. Can include curry orders in `mealIds` (handled in curry module)
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "deliveryGroup": {
-      "id": "uuid",
-      "serviceDate": "2025-01-15",
-      "meals": [ /* updated meals */ ]
-    }
-  },
-  "message": "Meals grouped for delivery successfully"
-}
-```
-
-**Errors**:
-- 400 if mealIds count < 2
-- 403 if any meal doesn't belong to user
-- 422 if dates don't match or meals paused
-
-#### DELETE /api/meals/group/:groupId
-
-**Purpose**: Ungroup delivery group
-
-**Authentication**: Required
-
-**Business Logic**:
-1. Verify group belongs to user
-2. Update all meals in group: Set `deliveryGroupId = null`
-3. Keep their current `deliverySlotId` (don't reset to default)
-4. Delete delivery group record
-
-**Response (200)**:
-```json
-{
-  "message": "Delivery group removed successfully"
-}
-```
-
-**Errors**:
-- 403 if group doesn't belong to user
-- 404 if group not found
-
----
-
-### Module 8: Meal Pausing
-
-**Base Path**: `/api/meals`
-
-#### POST /api/meals/pause
-
-**Purpose**: Pause specific meal for today or tomorrow
-
-**Authentication**: Required
-
-**Request Body**:
-```json
-{
-  "date": "2025-01-15",
-  "mealType": "lunch"
-}
-```
-
-**Validation**:
-- `date`: Required, ISO format, must be today or tomorrow (in IST)
-- `mealType`: Required, one of ['breakfast', 'lunch', 'dinner', 'snacks', 'all']
-
-**Business Logic**:
-1. Get current time in IST
-2. If pausing for today AND current time >= 20:00 (8 PM IST):
-   - Return 422 "Cannot pause meals after 8 PM. Please pause before 8 PM IST."
-3. Get user's active subscription
-4. Check if subscription includes requested meal type
-   - If `mealType = 'all'`: Check if any meals exist for date
-   - Else: Check if package includes the meal type
-5. Generate meals for requested date if not exist (on-demand generation)
-6. If `mealType = 'all'`:
-   - Update all meals for that date: Set `isPaused = true`
-   - Create `meal_pauses` record with `mealType = 'all'`
-7. Else:
-   - Update specific meal: Set `isPaused = true`
-   - Create `meal_pauses` record with specific `mealType`
-8. Create notification: "Your {mealType} for {date} has been paused"
-
-**Response (200)**:
-```json
-{
-  "message": "Meal paused successfully"
-}
-```
-
-**Errors**:
-- 422 if past 8 PM and pausing today
-- 422 if date not in allowed range (today/tomorrow)
-- 422 if no active subscription
-- 422 if meal already paused
-- 404 if subscription doesn't include requested meal type
-
-#### POST /api/meals/unpause
-
-**Purpose**: Unpause previously paused meal
-
-**Authentication**: Required
-
-**Request Body**:
-```json
-{
-  "date": "2025-01-15",
-  "mealType": "lunch"
-}
-```
-
-**Validation**: Same as pause
-
-**Business Logic**:
-1. Same time check (before 8 PM for today)
-2. Update meal(s): Set `isPaused = false`
-3. Keep `meal_pauses` record for audit (don't delete)
-4. Create notification: "Your {mealType} for {date} has been resumed"
-
-**Response (200)**:
-```json
-{
-  "message": "Meal resumed successfully"
-}
-```
-
-**Errors**: Same as pause endpoint
-
----
-
-### Module 9: Curry Token System
-
-**Base Path**: `/api/curry`
-
-#### GET /api/curry/packages
-
-**Purpose**: Get available curry token packages
-
-**Authentication**: Required
-
-**Query Parameters**:
-- `diet` (optional): Filter by diet type ['veg', 'non_veg']
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "packages": [
-      {
-        "id": "uuid",
-        "name": "Veg Curry 10-Pack",
-        "dietType": "veg",
-        "tokenCount": 10,
-        "validityDays": 30,
-        "price": 500.00
-      }
-    ]
-  }
-}
-```
-
-**Logic**:
-- Return packages where `isActive = true`
-- Apply diet filter if provided
-- Order by price ascending
-
-#### POST /api/curry/purchase
-
-**Purpose**: Purchase curry token package
-
-**Authentication**: Required
-
-**Request Body**:
-```json
-{
-  "packageId": "uuid"
-}
-```
-
-**Validation**:
-- `packageId`: Required, must exist and be active
-
-**Business Logic**:
-1. Fetch package details
-2. Check if user has existing wallet for this `dietType`
-3. Calculate `validUntil = currentDateIST + package.validityDays`
-4. If wallet exists:
-   - Add `package.tokenCount` to existing `totalTokens`
-   - Update `validUntil` to new date (extend validity)
-5. If wallet doesn't exist:
-   - Create new `user_curry_wallets` record
-   - Set `totalTokens = package.tokenCount`
-   - Set `usedTokens = 0`
-   - Set `validUntil`
-6. Create notification: "You have purchased {tokenCount} curry tokens"
-
-**Response (201)**:
-```json
-{
-  "data": {
-    "wallet": {
-      "id": "uuid",
-      "dietType": "veg",
-      "totalTokens": 10,
-      "usedTokens": 0,
-      "remainingTokens": 10,
-      "validUntil": "2025-02-14"
-    }
-  },
-  "message": "Curry tokens purchased successfully"
-}
-```
-
-**Errors**:
-- 404 if package not found or inactive
-
-#### GET /api/curry/wallet
-
-**Purpose**: Get user's curry token wallets
-
-**Authentication**: Required
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "wallets": [
-      {
-        "id": "uuid",
-        "dietType": "veg",
-        "totalTokens": 10,
-        "usedTokens": 3,
-        "remainingTokens": 7,
-        "validUntil": "2025-02-14",
-        "isExpired": false
-      }
-    ]
-  }
-}
-```
-
-**Logic**:
-- Return all wallets for `req.user.id`
-- Calculate `remainingTokens = totalTokens - usedTokens`
-- Calculate `isExpired = validUntil < currentDateIST`
-- Order by `createdAt DESC`
-
-#### POST /api/curry/order
-
-**Purpose**: Place curry order using tokens
-
-**Authentication**: Required
-
-**Request Body**:
-```json
-{
-  "dietType": "veg",
-  "cuisineType": "south_indian",
-  "orderDate": "2025-01-15",
-  "deliverySlotId": "uuid",
-  "groupWithMeal": false
-}
-```
-
-**Validation**:
-- `dietType`: Required, one of ['veg', 'non_veg']
-- `cuisineType`: Required, one of ['south_indian', 'north_indian']
-- `orderDate`: Required, ISO date, must be today or tomorrow
-- `deliverySlotId`: Optional, must exist if provided
-- `groupWithMeal`: Optional boolean
-
-**Business Logic**:
-1. Get user's wallet for specified `dietType`
-2. If no wallet: Return 422 "No curry token wallet found for {dietType}"
-3. Check wallet not expired: `validUntil >= currentDateIST`
-   - If expired: Return 422 "Your curry tokens have expired"
-4. Calculate remaining tokens: `totalTokens - usedTokens`
-5. If remaining < 1: Return 422 "Insufficient curry tokens"
-6. Check if user already has curry order for this date
-   - If exists and status = 'ordered': Return 422 "You already have a curry order for this date"
-7. Create `curry_orders` record:
-   - Set `userId`, `walletId`, `cuisineType`, `orderDate`
-   - Set `status = 'ordered'`
-   - Set `deliverySlotId` if provided, else use default lunch slot
-8. Increment wallet's `usedTokens` by 1
-9. If `groupWithMeal = true`:
-   - Get user's subscription meals for `orderDate`
-   - Find lunch meal (most common pairing)
-   - If found, create delivery group and link both
-10. Create notification: "Your curry order for {date} has been placed"
-
-**Response (201)**:
-```json
-{
-  "data": {
-    "order": {
-      "id": "uuid",
-      "cuisineType": "south_indian",
-      "orderDate": "2025-01-15",
-      "deliverySlot": { /* slot details */ },
-      "status": "ordered",
-      "remainingTokens": 6
-    }
-  },
-  "message": "Curry order placed successfully"
-}
-```
-
-**Errors**:
-- 422 if no wallet, expired, or insufficient tokens
-- 422 if duplicate order for date
-- 404 if delivery slot not found
-
-#### GET /api/curry/orders
-
-**Purpose**: Get user's curry order history
-
-**Authentication**: Required
-
-**Query Parameters**:
-- `status` (optional): Filter by status ['ordered', 'cancelled', 'fulfilled']
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "orders": [
-      {
-        "id": "uuid",
-        "cuisineType": "south_indian",
-        "orderDate": "2025-01-15",
-        "status": "ordered",
-        "deliverySlot": { /* slot details */ },
-        "createdAt": "2025-01-14T10:00:00Z"
-      }
-    ]
-  }
-}
-```
-
-**Logic**:
-- Return orders for `req.user.id`
-- Apply status filter if provided
-- Include delivery slot details
-- Order by `orderDate DESC`, then `createdAt DESC`
-- Limit to most recent 50
-
-#### DELETE /api/curry/orders/:orderId
-
-**Purpose**: Cancel curry order
-
-**Authentication**: Required
-
-**Business Logic**:
-1. Verify order belongs to user
-2. Verify order `status = 'ordered'` (can't cancel fulfilled/cancelled)
-3. Verify `orderDate >= currentDateIST` (can't cancel past orders)
-4. Update order: Set `status = 'cancelled'`
-5. Refund token: Decrement wallet's `usedTokens` by 1
-6. Create notification: "Your curry order for {date} has been cancelled"
-
-**Response (200)**:
-```json
-{
-  "message": "Curry order cancelled successfully"
-}
-```
-
-**Errors**:
-- 403 if order doesn't belong to user
-- 404 if order not found
-- 422 if order already fulfilled/cancelled or date passed
-
----
-
-### Module 10: Upgrades
-
-**Base Path**: `/api/upgrades`
-
-#### GET /api/upgrades/prices
-
-**Purpose**: Get available upgrade prices
-
-**Authentication**: Required
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "upgrades": [
-      {
-        "id": "uuid",
-        "upgradeType": "veg_to_nonveg",
-        "scope": "meal",
-        "mealType": "lunch",
-        "price": 50.00
-      },
-      {
-        "id": "uuid",
-        "upgradeType": "south_to_north",
-        "scope": "day",
-        "mealType": null,
-        "price": 100.00
-      }
-    ]
-  }
-}
-```
-
-**Logic**:
-- Return all upgrades where `isActive = true`
-- Order by `upgradeType`, then `scope`
-
-#### POST /api/upgrades/apply
-
-**Purpose**: Apply temporary upgrade to subscription
-
-**Authentication**: Required
-
-**Request Body**:
-```json
-{
-  "upgradeType": "veg_to_nonveg",
-  "scope": "meal",
-  "mealType": "lunch",
-  "startDate": "2025-01-15",
-  "endDate": "2025-01-15"
-}
-```
-
-**Validation**:
-- `upgradeType`: Required, one of ['veg_to_nonveg', 'south_to_north']
-- `scope`: Required, one of ['meal', 'day', 'week']
-- `mealType`: Required if `scope = 'meal'`, one of ['breakfast', 'lunch', 'dinner']
-- `startDate`: Required, ISO date, must be today or future
-- `endDate`: Required, ISO date, must be >= startDate
-
-**Business Logic**:
-1. Get user's active subscription
-2. If no active subscription: Return 422 "No active subscription found"
-3. Verify subscription allows this upgrade:
-   - If `upgradeType = 'veg_to_nonveg'`: Check `mealPackage.allowsDietUpgrade = true`
-   - If `upgradeType = 'south_to_north'`: Check `mealPackage.allowsCuisineUpgrade = true`
-   - If not allowed: Return 422 "This upgrade is not available for your subscription"
-4. Verify dates are within subscription period
-5. Fetch upgrade price matching `upgradeType`, `scope`, and `mealType`
-6. If no price found: Return 404 "Upgrade price not found"
-7. Calculate total price:
-   - If `scope = 'meal'`: `price × number of days between startDate and endDate`
-   - If `scope = 'day'`: `price × number of days`
-   - If `scope = 'week'`: `price × number of weeks`
-8. Create `subscription_upgrades` record
-9. Create notification: "Upgrade applied: {upgradeType} for {scope}"
-
-**Response (201)**:
-```json
-{
-  "data": {
-    "upgrade": {
-      "id": "uuid",
-      "upgradeType": "veg_to_nonveg",
-      "scope": "meal",
-      "mealType": "lunch",
-      "startDate": "2025-01-15",
-      "endDate": "2025-01-15",
-      "price": 50.00
-    }
-  },
-  "message": "Upgrade applied successfully"
-}
-```
-
-**Errors**:
-- 422 if no active subscription
-- 422 if upgrade not allowed by package
-- 404 if price not found
-- 400 if date range invalid
-
-#### GET /api/upgrades/active
-
-**Purpose**: Get active upgrades for user's subscription
-
-**Authentication**: Required
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "upgrades": [
-      {
-        "id": "uuid",
-        "upgradeType": "veg_to_nonveg",
-        "scope": "meal",
-        "mealType": "lunch",
-        "startDate": "2025-01-15",
-        "endDate": "2025-01-20",
-        "price": 250.00
-      }
-    ]
-  }
-}
-```
-
-**Logic**:
-- Get user's active subscription
-- Return upgrades for that subscription where `endDate >= currentDateIST`
-- Order by `startDate ASC`
-
-**Errors**:
-- 422 if no active subscription
-
-#### DELETE /api/upgrades/:upgradeId
-
-**Purpose**: Remove applied upgrade
-
-**Authentication**: Required
-
-**Business Logic**:
-1. Verify upgrade belongs to user's subscription
-2. Verify upgrade hasn't started yet (`startDate > currentDateIST`)
-3. Delete upgrade record
-4. Create notification: "Upgrade removed"
-
-**Response (200)**:
-```json
-{
-  "message": "Upgrade removed successfully"
-}
-```
-
-**Errors**:
-- 403 if upgrade doesn't belong to user
-- 404 if upgrade not found
-- 422 if upgrade already started
-
----
-
-### Module 11: Notifications
-
-**Base Path**: `/api/notifications`
-
-#### GET /api/notifications
-
-**Purpose**: Get user's notifications
-
-**Authentication**: Required
-
-**Query Parameters**:
-- `unreadOnly` (optional): Boolean, default false
-
-**Response (200)**:
-```json
-{
-  "data": {
-    "notifications": [
-      {
-        "id": "uuid",
-        "title": "Subscription Activated",
-        "message": "Your subscription has been activated successfully",
-        "isRead": false,
-        "createdAt": "2025-01-15T10:00:00Z"
-      }
-    ],
-    "unreadCount": 3
-  }
-}
-```
-
-**Logic**:
-- Return notifications for `req.user.id`
-- If `unreadOnly = true`: Filter by `isRead = false`
-- Calculate `unreadCount` separately (always return total unread)
-- Order by `createdAt DESC`
-- Limit to most recent 50
-
-#### POST /api/notifications/:notificationId/read
-
-**Purpose**: Mark notification as read
-
-**Authentication**: Required
-
-**Business Logic**:
-1. Verify notification belongs to user
-2. Update: Set `isRead = true`
-
-**Response (200)**:
-```json
-{
-  "message": "Notification marked as read"
-}
-```
-
-**Errors**:
-- 403 if notification doesn't belong to user
-- 404 if notification not found
-
-#### POST /api/notifications/read-all
-
-**Purpose**: Mark all notifications as read
-
-**Authentication**: Required
-
-**Business Logic**:
-- Update all user's notifications: Set `isRead = true`
-
-**Response (200)**:
-```json
-{
-  "message": "All notifications marked as read"
-}
-```
-
----
-
-## Implementation File Structure
-
-### Controllers Layer (`src/controllers/`)
-
-Each controller handles HTTP request/response for one module:
-
-- `authController.js` - POST /auth/login, PUT /auth/profile
-- `addressController.js` - CRUD for addresses, GET common points
-- `mealPackageController.js` - Browse and view meal packages
-- `menuController.js` - Get weekly menus
-- `subscriptionController.js` - Create subscription, view active/history
-- `mealController.js` - Get schedule, pause/unpause meals
-- `deliveryController.js` - Get slots, group meals, change delivery time
-- `curryController.js` - Browse packages, purchase, order, wallet, cancel
-- `upgradeController.js` - Get prices, apply upgrade, view/remove upgrades
-- `notificationController.js` - Get notifications, mark read
-
-**Controller Pattern**:
-- Extract req.body, req.params, req.query
-- Validate using express-validator
-- Call service layer method
-- Return JSON response
-- Use try-catch to pass errors to centralized middleware
-
-### Services Layer (`src/services/`)
-
-Business logic implementation:
-
-- `authService.js` - Find/create user, update profile
-- `addressService.js` - CRUD addresses, search common points, primary address logic
-- `mealPackageService.js` - Fetch packages with filters
-- `menuService.js` - Calculate week dates, fetch menus
-- `subscriptionService.js` - Create subscription, calculate end date, check active subscription
-- `mealService.js` - **On-demand meal generation**, pause logic, 8 PM check
-- `deliveryService.js` - Delivery grouping, slot management
-- `curryService.js` - Purchase tokens, place orders, refund logic
-- `upgradeService.js` - Validate upgrades, calculate prices
-- `notificationService.js` - Create notifications, mark read (helper for other services)
-
-**Service Pattern**:
-- Accept data objects as parameters
-- Use Prisma client for database operations
-- Return data objects or throw errors
-- Handle all business logic and validations
-- Use timezone utils for date operations
-
-### Routes Layer (`src/routes/`)
-
-Express route definitions:
-
-- `authRoutes.js`
-- `addressRoutes.js`
-- `mealPackageRoutes.js`
-- `menuRoutes.js`
-- `subscriptionRoutes.js`
-- `mealRoutes.js`
-- `deliveryRoutes.js`
-- `curryRoutes.js`
-- `upgradeRoutes.js`
-- `notificationRoutes.js`
-
-**Route Pattern**:
+**Implementation Pattern**:
 ```javascript
-// Example structure
-const express = require('express');
-const { authenticate } = require('../middleware/auth');
-const { validate } = require('../middleware/validate');
-const controller = require('../controllers/subscriptionController');
-const { subscriptionValidation } = require('../middleware/validators');
+function errorHandler(err, req, res, next) {
+  // Log error for debugging
+  console.error('Error:', err);
 
-const router = express.Router();
+  // Handle different error types
 
-// All routes protected by auth middleware
-router.post(
-  '/subscriptions',
-  authenticate,
-  validate(subscriptionValidation.create),
-  controller.createSubscription
-);
+  // Prisma errors
+  if (err.code === 'P2002') {
+    // Unique constraint violation
+    return res.status(422).json({
+      error: {
+        message: 'A record with this value already exists',
+        code: 'DUPLICATE_ENTRY',
+        status: 422
+      }
+    });
+  }
 
-module.exports = router;
-```
+  if (err.code === 'P2025') {
+    // Record not found
+    return res.status(404).json({
+      error: {
+        message: 'Record not found',
+        code: 'NOT_FOUND',
+        status: 404
+      }
+    });
+  }
 
-### Middleware Layer (`src/middleware/`)
+  // Express-validator errors
+  if (err.errors && Array.isArray(err.errors)) {
+    return res.status(400).json({
+      error: {
+        message: err.errors[0].msg,
+        code: 'VALIDATION_ERROR',
+        status: 400
+      }
+    });
+  }
 
-- `auth.ts` - Firebase token verification, user attachment
-- `errorHandler.ts` - Centralized error middleware
-- `validate.ts` - express-validator wrapper
-- `validators/` - Validation schemas for each route:
-  - `addressValidators.ts`
-  - `subscriptionValidators.ts`
-  - `mealValidators.ts`
-  - `curryValidators.ts`
-  - `upgradeValidators.ts`
+  // Custom business logic errors
+  if (err.status && err.code) {
+    return res.status(err.status).json({
+      error: {
+        message: err.message,
+        code: err.code,
+        status: err.status
+      }
+    });
+  }
 
-**Error Handler Middleware** (`src/middleware/errorHandler.ts`):
-- Catches all thrown errors
-- Formats Prisma errors (unique constraint, foreign key, etc.)
-- Formats validation errors from express-validator
-- Returns consistent JSON error response
-- Logs errors to console (for debugging)
-
-### Utilities (`src/utils/`)
-
-- `timezone.js` - IST timezone helpers:
-  ```javascript
-  function getCurrentISTTime()
-  function isBeforePauseDeadline()
-  function convertToIST(date)
-  function getTodayIST()
-  function getTomorrowIST()
-  function calculateWeekStart(date)
-  ```
-
-- `prisma.js` - Prisma client singleton:
-  ```javascript
-  const { PrismaClient } = require('@prisma/client');
-  const prisma = new PrismaClient();
-  module.exports = prisma;
-  ```
-
-- `responseFormatter.js` - Helpers for consistent responses:
-  ```javascript
-  function successResponse(data, message)
-  function errorResponse(message, code, status)
-  ```
-
-### Configuration (`src/config/`)
-
-- `firebase.js` - Firebase Admin SDK initialization:
-  ```javascript
-  const admin = require('firebase-admin');
-
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    }),
+  // Default server error
+  return res.status(500).json({
+    error: {
+      message: 'Internal server error',
+      code: 'INTERNAL_ERROR',
+      status: 500
+    }
   });
+}
 
-  module.exports = admin;
-  ```
+module.exports = { errorHandler };
+```
 
-### Entry Point (`src/index.js`)
+**Custom Error Class**:
 
-Main server file:
+**File**: `src/utils/AppError.js`
 
 ```javascript
+class AppError extends Error {
+  constructor(message, code, status) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+module.exports = AppError;
+```
+
+**Usage in Services**:
+```javascript
+const AppError = require('../utils/AppError');
+
+// Example
+if (!subscription) {
+  throw new AppError(
+    'No active subscription found',
+    'NO_ACTIVE_SUBSCRIPTION',
+    422
+  );
+}
+```
+
+### Validation Middleware
+
+**File**: `src/middleware/validate.js`
+
+```javascript
+const { validationResult } = require('express-validator');
+
+function validate(req, res, next) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: {
+        message: errors.array()[0].msg,
+        code: 'VALIDATION_ERROR',
+        status: 400,
+        details: errors.array()
+      }
+    });
+  }
+  next();
+}
+
+module.exports = { validate };
+```
+
+**Validator Example**:
+
+**File**: `src/middleware/validators/subscriptionValidators.js`
+
+```javascript
+const { body } = require('express-validator');
+const { CONTAINER_TYPES } = require('../../utils/constants');
+
+const createSubscriptionValidation = [
+  body('mealPackageId').isUUID().withMessage('Invalid meal package ID'),
+  body('addressId').isUUID().withMessage('Invalid address ID'),
+  body('containerType').isIn(CONTAINER_TYPES).withMessage('Invalid container type'),
+  body('startDate').isISO8601().withMessage('Invalid start date format'),
+];
+
+module.exports = { createSubscriptionValidation };
+```
+
+---
+
+## Prisma Client Setup
+
+**File**: `src/utils/prisma.js`
+
+```javascript
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+});
+
+module.exports = prisma;
+```
+
+**Usage in Services**:
+```javascript
+const prisma = require('../utils/prisma');
+
+async function getActiveSubscription(userId) {
+  return await prisma.subscription.findFirst({
+    where: {
+      userId,
+      status: 'active'
+    },
+    include: {
+      mealPackage: true,
+      address: true
+    }
+  });
+}
+```
+
+---
+
+## Package Configuration
+
+### package.json
+
+**File**: `package.json`
+
+```json
+{
+  "name": "vyanjo-backend",
+  "version": "1.0.0",
+  "description": "Meal and curry subscription backend API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:prod": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "seed": "node prisma/seed.js"
+  },
+  "keywords": ["meal", "subscription", "api"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@prisma/client": "^5.7.0",
+    "firebase-admin": "^12.0.0",
+    "express-validator": "^7.0.1",
+    "moment-timezone": "^0.5.44",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "prisma": "^5.7.0",
+    "nodemon": "^3.0.2"
+  }
+}
+```
+
+**Key Dependencies**:
+- `express` - Web framework
+- `@prisma/client` - Database ORM (generated)
+- `firebase-admin` - Firebase authentication
+- `express-validator` - Request validation
+- `moment-timezone` - IST timezone handling
+- `cors` - CORS middleware
+- `dotenv` - Environment variable management
+
+**Dev Dependencies**:
+- `prisma` - Prisma CLI
+- `nodemon` - Development hot reload
+
+---
+
+## Environment Variables
+
+### .env.example
+
+**File**: `.env.example`
+
+```bash
+# Server Configuration
+NODE_ENV=development
+PORT=3000
+
+# Database
+DATABASE_URL="postgresql://user:password@localhost:5432/vyanjo_db?schema=public"
+
+# Firebase Admin SDK
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_KEY_HERE\n-----END PRIVATE KEY-----\n"
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@your-project.iam.gserviceaccount.com
+```
+
+**Setup Instructions**:
+1. Copy `.env.example` to `.env`
+2. Update `DATABASE_URL` with PostgreSQL connection string
+3. Get Firebase service account:
+   - Firebase Console → Project Settings → Service Accounts
+   - Generate New Private Key (downloads JSON)
+   - Extract `project_id`, `private_key`, `client_email`
+4. For `FIREBASE_PRIVATE_KEY`: Keep newlines escaped as `\n` or encode as base64
+
+### .gitignore
+
+Ensure `.env` is in `.gitignore`:
+```
+node_modules/
+.env
+dist/
+*.log
+.DS_Store
+```
+
+---
+
+## Entry Point (Server Initialization)
+
+### Main Server File
+
+**File**: `src/index.js`
+
+```javascript
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { errorHandler } = require('./middleware/errorHandler');
 
-// Import all routes
+// Import routes
 const authRoutes = require('./routes/authRoutes');
 const addressRoutes = require('./routes/addressRoutes');
 const mealPackageRoutes = require('./routes/mealPackageRoutes');
@@ -2009,13 +1424,18 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Health check
+// Health check endpoint (no auth required)
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV
+  });
 });
 
-// Mount routes
+// Mount API routes
 app.use('/api/auth', authRoutes);
 app.use('/api', addressRoutes);
 app.use('/api', mealPackageRoutes);
@@ -2027,281 +1447,155 @@ app.use('/api', curryRoutes);
 app.use('/api', upgradeRoutes);
 app.use('/api', notificationRoutes);
 
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    error: {
+      message: 'Endpoint not found',
+      code: 'NOT_FOUND',
+      status: 404
+    }
+  });
+});
+
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
+// Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📌 Environment: ${process.env.NODE_ENV}`);
+  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
 });
 ```
 
+**Startup Flow**:
+1. Load environment variables
+2. Initialize Express app
+3. Apply middleware (CORS, JSON parsing)
+4. Mount routes
+5. Add error handlers
+6. Start listening on PORT
+
 ---
 
-## Package Dependencies
+## Database Seeding
 
-### package.json
+### Seed Script
 
-```json
-{
-  "name": "vyanjo-backend",
-  "version": "1.0.0",
-  "description": "Meal and curry subscription backend",
-  "main": "dist/index.js",
-  "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "@prisma/client": "^5.7.0",
-    "firebase-admin": "^12.0.0",
-    "express-validator": "^7.0.1",
-    "moment-timezone": "^0.5.44"
-  },
-  "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/cors": "^2.8.17",
-    "@types/node": "^20.10.0",
-    "typescript": "^5.3.3",
-    "ts-node-dev": "^2.0.0",
-    "prisma": "^5.7.0"
-  }
+**File**: `prisma/seed.js`
+
+**Purpose**: Populate initial data required for system to function
+
+**Required Seed Data**:
+1. Delivery time slots (4 default slots)
+2. At least 1-2 meal packages for testing
+3. Curry token packages (veg and non-veg)
+4. Upgrade prices
+5. Optional: Weekly menu for current week
+
+```javascript
+const { PrismaClient } = require('@prisma/client');
+const moment = require('moment-timezone');
+
+const prisma = new PrismaClient();
+
+async function main() {
+  console.log('🌱 Starting database seeding...');
+
+  // 1. Delivery Time Slots
+  console.log('Creating delivery time slots...');
+  await prisma.deliveryTimeSlot.createMany({
+    data: [
+      { name: 'Morning Slot', startTime: '07:00:00', endTime: '08:00:00', isActive: true },
+      { name: 'Afternoon Slot', startTime: '12:00:00', endTime: '13:00:00', isActive: true },
+      { name: 'Evening Snack Slot', startTime: '17:00:00', endTime: '18:00:00', isActive: true },
+      { name: 'Dinner Slot', startTime: '19:00:00', endTime: '20:00:00', isActive: true },
+    ],
+    skipDuplicates: true
+  });
+
+  // 2. Meal Packages
+  console.log('Creating meal packages...');
+  await prisma.mealPackage.createMany({
+    data: [
+      {
+        name: 'South Indian Veg Weekly',
+        dietType: 'veg',
+        cuisineType: 'south_indian',
+        includesBreakfast: true,
+        includesLunch: true,
+        includesDinner: true,
+        includesSnacks: false,
+        durationDays: 7,
+        defaultContainer: 'steel',
+        allowsContainerChoice: true,
+        allowsDietUpgrade: false,
+        allowsCuisineUpgrade: true,
+        price: 1200.00,
+        isActive: true
+      },
+      {
+        name: 'North Indian Veg Monthly',
+        dietType: 'veg',
+        cuisineType: 'north_indian',
+        includesBreakfast: true,
+        includesLunch: true,
+        includesDinner: true,
+        includesSnacks: true,
+        durationDays: 30,
+        defaultContainer: 'plastic',
+        allowsContainerChoice: true,
+        allowsDietUpgrade: true,
+        allowsCuisineUpgrade: false,
+        price: 4500.00,
+        isActive: true
+      }
+    ],
+    skipDuplicates: true
+  });
+
+  // 3. Curry Token Packages
+  console.log('Creating curry token packages...');
+  await prisma.curryTokenPackage.createMany({
+    data: [
+      { name: 'Veg Curry 10-Pack', dietType: 'veg', tokenCount: 10, validityDays: 30, price: 500.00, isActive: true },
+      { name: 'Veg Curry 20-Pack', dietType: 'veg', tokenCount: 20, validityDays: 60, price: 900.00, isActive: true },
+      { name: 'Non-Veg Curry 10-Pack', dietType: 'non_veg', tokenCount: 10, validityDays: 30, price: 700.00, isActive: true },
+    ],
+    skipDuplicates: true
+  });
+
+  // 4. Upgrade Prices
+  console.log('Creating upgrade prices...');
+  await prisma.upgradePrice.createMany({
+    data: [
+      { upgradeType: 'veg_to_nonveg', scope: 'meal', mealType: 'lunch', price: 50.00, isActive: true },
+      { upgradeType: 'veg_to_nonveg', scope: 'meal', mealType: 'dinner', price: 50.00, isActive: true },
+      { upgradeType: 'veg_to_nonveg', scope: 'day', mealType: null, price: 100.00, isActive: true },
+      { upgradeType: 'south_to_north', scope: 'day', mealType: null, price: 80.00, isActive: true },
+      { upgradeType: 'south_to_north', scope: 'week', mealType: null, price: 500.00, isActive: true },
+    ],
+    skipDuplicates: true
+  });
+
+  console.log('✅ Seeding completed successfully!');
 }
+
+main()
+  .catch((e) => {
+    console.error('❌ Error during seeding:', e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
 ```
 
-**Key Dependencies**:
-- `express` - Web framework
-- `@prisma/client` - Generated Prisma client
-- `firebase-admin` - Firebase auth verification
-- `express-validator` - Request validation
-- `moment-timezone` - IST timezone handling
-- `cors` - CORS middleware
-
-**Dev Dependencies**:
-- `typescript` - TypeScript compiler
-- `prisma` - Prisma CLI
-- `ts-node-dev` - Development server with hot reload
-
----
-
-## Environment Variables
-
-### .env.example
-
+**Run Seed**:
 ```bash
-# Server
-PORT=3000
-NODE_ENV=development
-
-# Database
-DATABASE_URL="postgresql://user:password@localhost:5432/vyanjo_db?schema=public"
-
-# Firebase Admin SDK
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk@your-project.iam.gserviceaccount.com
+npm run seed
 ```
-
-**Setup Instructions**:
-1. Copy `.env.example` to `.env`
-2. Update `DATABASE_URL` with actual PostgreSQL connection string
-3. Create Firebase service account in Firebase Console
-4. Download service account JSON
-5. Extract `project_id`, `private_key`, `client_email` and add to `.env`
-
----
-
-## TypeScript Configuration
-
-### tsconfig.json
-
-```json
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["ES2020"],
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "types": ["node"]
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
-}
-```
-
----
-
-## Initial Data Seeding
-
-### Required Seed Data
-
-**File**: `prisma/seed.ts` (optional, for development/testing)
-
-**Must seed before system can function**:
-
-1. **Delivery Time Slots** (required for meal generation):
-   ```typescript
-   // Create default delivery slots
-   await prisma.deliveryTimeSlot.createMany({
-     data: [
-       { name: 'Morning Slot', startTime: '07:00:00', endTime: '08:00:00', isActive: true },
-       { name: 'Afternoon Slot', startTime: '12:00:00', endTime: '13:00:00', isActive: true },
-       { name: 'Evening Snack Slot', startTime: '17:00:00', endTime: '18:00:00', isActive: true },
-       { name: 'Dinner Slot', startTime: '19:00:00', endTime: '20:00:00', isActive: true },
-     ],
-   });
-   ```
-
-2. **Meal Packages** (at least one for testing):
-   ```typescript
-   await prisma.mealPackage.create({
-     data: {
-       name: 'South Indian Veg Weekly',
-       dietType: 'veg',
-       cuisineType: 'south_indian',
-       includesBreakfast: true,
-       includesLunch: true,
-       includesDinner: true,
-       includesSnacks: false,
-       durationDays: 7,
-       defaultContainer: 'steel',
-       allowsContainerChoice: true,
-       allowsDietUpgrade: false,
-       allowsCuisineUpgrade: true,
-       price: 1200.00,
-       isActive: true,
-     },
-   });
-   ```
-
-3. **Curry Token Packages**:
-   ```typescript
-   await prisma.curryTokenPackage.createMany({
-     data: [
-       { name: 'Veg Curry 10-Pack', dietType: 'veg', tokenCount: 10, validityDays: 30, price: 500.00, isActive: true },
-       { name: 'Non-Veg Curry 10-Pack', dietType: 'non_veg', tokenCount: 10, validityDays: 30, price: 700.00, isActive: true },
-     ],
-   });
-   ```
-
-4. **Upgrade Prices**:
-   ```typescript
-   await prisma.upgradePrice.createMany({
-     data: [
-       { upgradeType: 'veg_to_nonveg', scope: 'meal', mealType: 'lunch', price: 50.00, isActive: true },
-       { upgradeType: 'veg_to_nonveg', scope: 'day', mealType: null, price: 100.00, isActive: true },
-       { upgradeType: 'south_to_north', scope: 'day', mealType: null, price: 80.00, isActive: true },
-     ],
-   });
-   ```
-
-5. **Weekly Menus** (for current week):
-   ```typescript
-   const currentWeekStart = // Calculate Monday of current week
-   const menu = await prisma.weeklyMenu.create({
-     data: {
-       dietType: 'veg',
-       cuisineType: 'south_indian',
-       weekStartDate: currentWeekStart,
-     },
-   });
-
-   await prisma.weeklyMenuItem.createMany({
-     data: [
-       { weeklyMenuId: menu.id, itemType: 'breakfast', itemName: 'Idli, Sambar, Chutney' },
-       { weeklyMenuId: menu.id, itemType: 'lunch', itemName: 'Rice, Dal, Rasam, Vegetable Curry' },
-       { weeklyMenuId: menu.id, itemType: 'dinner', itemName: 'Chapati, Paneer Curry, Rice' },
-     ],
-   });
-   ```
-
-**Seed Command**: Add to package.json:
-```json
-"scripts": {
-  "seed": "ts-node prisma/seed.ts"
-}
-```
-
----
-
-## Critical Business Logic Implementation Notes
-
-### 1. On-Demand Meal Generation
-
-**Location**: `src/services/mealService.ts`
-
-**Function**: `generateMealsIfNeeded(subscriptionId, dates)`
-
-**Logic**:
-1. Check if `subscription_meals` exist for given dates
-2. If not, fetch subscription details with meal package
-3. For each date:
-   - For each included meal type (breakfast/lunch/dinner/snacks):
-     - Create `subscription_meals` row
-     - Assign default `deliverySlotId` based on meal type
-     - Query `delivery_time_slots` to get slot ID
-4. Return generated meals
-
-**Called from**:
-- `GET /api/meals/schedule`
-- `POST /api/meals/pause`
-- `POST /api/meals/unpause`
-
-### 2. 8 PM Pause Deadline Check
-
-**Location**: `src/utils/timezone.ts`
-
-**Function**: `isBeforePauseDeadline()`
-
-```typescript
-export function isBeforePauseDeadline(): boolean {
-  const now = moment().tz('Asia/Kolkata');
-  const hour = now.hour();
-  return hour < 20; // Before 8 PM
-}
-```
-
-**Usage**:
-- In `POST /meals/pause` and `POST /meals/unpause`
-- Only enforce for same-day pauses
-- Tomorrow pauses allowed anytime
-
-### 3. Active Subscription Uniqueness
-
-**Location**: `src/services/subscriptionService.ts`
-
-**Function**: `createSubscription()`
-
-**Logic**:
-1. Query: `prisma.subscription.findFirst({ where: { userId, status: 'active' } })`
-2. If found: Throw error "You already have an active subscription"
-3. Database partial unique index provides backup enforcement
-
-### 4. Notification Creation Helper
-
-**Location**: `src/services/notificationService.ts`
-
-**Function**: `createNotification(userId, title, message)`
-
-**Usage**: Called from various services:
-- Subscription creation
-- Meal pause/unpause
-- Curry purchase/order
-- Upgrade application
-
-Keeps notification logic centralized and consistent.
 
 ---
 
@@ -2310,127 +1604,331 @@ Keeps notification logic centralized and consistent.
 ### Initial Setup Steps
 
 1. **Clone repository**
-2. **Install dependencies**: `npm install`
-3. **Setup environment**: Copy `.env.example` to `.env`, fill values
-4. **Setup database**: Create PostgreSQL database
-5. **Run migrations**: `npm run prisma:migrate`
-6. **Generate Prisma client**: `npm run prisma:generate`
-7. **Seed data**: `npm run seed` (after creating seed file)
-8. **Start dev server**: `npm run dev`
+   ```bash
+   cd vyanjo-backend
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Setup environment variables**
+   ```bash
+   cp .env.example .env
+   # Edit .env with actual values
+   ```
+
+4. **Setup PostgreSQL database**
+   - Create database: `vyanjo_db`
+   - Note connection details for DATABASE_URL
+
+5. **Run database migrations**
+   ```bash
+   npm run prisma:migrate
+   ```
+
+6. **Generate Prisma client**
+   ```bash
+   npm run prisma:generate
+   ```
+
+7. **Seed initial data**
+   ```bash
+   npm run seed
+   ```
+
+8. **Start development server**
+   ```bash
+   npm run dev
+   ```
+
+9. **Test health endpoint**
+   ```bash
+   curl http://localhost:3000/health
+   ```
 
 ### Development Commands
 
-- `npm run dev` - Start development server with hot reload
+- `npm run dev` - Start with nodemon (hot reload)
 - `npm run prisma:studio` - Open Prisma Studio (database GUI)
-- `npm run prisma:migrate` - Create and apply migrations
-- `npm run build` - Build TypeScript to JavaScript
+- `npm run prisma:migrate` - Create new migration
+- `npm run prisma:generate` - Regenerate Prisma client
 - `npm start` - Start production server
 
-### Migration Workflow
+### Project Initialization Sequence
 
-When making schema changes:
-1. Edit `prisma/schema.prisma`
-2. Run `npx prisma migrate dev --name describe_change`
-3. Prisma generates migration SQL and updates client
-4. Migration applied automatically in dev
+**When starting from scratch** (empty vyanjo-backend folder):
+
+1. Initialize npm:
+   ```bash
+   npm init -y
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install express cors @prisma/client firebase-admin express-validator moment-timezone dotenv
+   npm install -D prisma nodemon
+   ```
+
+3. Initialize Prisma:
+   ```bash
+   npx prisma init
+   ```
+
+4. Copy complete Prisma schema from user's specification to `prisma/schema.prisma`
+
+5. Create all directory structure:
+   ```bash
+   mkdir -p src/{controllers,services,routes,middleware,utils,config}
+   mkdir -p src/middleware/validators
+   mkdir -p prisma
+   ```
+
+6. Create all files as specified in this plan
+
+7. Follow setup steps above
 
 ---
 
 ## Testing Approach
 
-**Manual Testing Recommended** (no automated tests specified, but good to plan for)
+### Manual Testing with Postman/Thunder Client
 
-### Test Flow Sequence
+**Create test collection with these sequences**:
 
-1. **Auth Flow**:
-   - Authenticate with Firebase (external)
-   - Call `POST /api/auth/login` with token
-   - Verify user created/returned
+**1. Authentication Flow**:
+- Authenticate with Firebase (external tool/frontend)
+- Copy ID token
+- POST /api/auth/login with token
+- Verify user created
 
-2. **Address Setup**:
-   - Create address: `POST /api/addresses`
-   - Verify primary address set
-   - Get addresses: `GET /api/addresses`
+**2. Address Setup**:
+- POST /api/addresses (create first address)
+- Verify isPrimary = true automatically
+- POST /api/addresses (create second)
+- GET /api/addresses (verify list)
 
-3. **Browse & Subscribe**:
-   - Get packages: `GET /api/meal-packages`
-   - Create subscription: `POST /api/subscriptions`
-   - Get active subscription: `GET /api/subscriptions/active`
+**3. Browse and Subscribe**:
+- GET /api/meal-packages
+- POST /api/subscriptions
+- GET /api/subscriptions/active
 
-4. **View Schedule**:
-   - Get meals: `GET /api/meals/schedule`
-   - Verify meals generated on-demand
-   - Check delivery slots assigned
+**4. Meal Schedule**:
+- GET /api/meals/schedule
+- Verify meals generated on-demand
+- Check default delivery slots assigned
 
-5. **Pause Meal**:
-   - Pause tomorrow's lunch: `POST /api/meals/pause`
-   - Verify meal marked as paused
-   - Verify notification created
+**5. Pause Functionality**:
+- POST /api/meals/pause (tomorrow's lunch)
+- Verify success
+- Try pausing today after 8 PM (should fail)
 
-6. **Curry Tokens**:
-   - Purchase tokens: `POST /api/curry/purchase`
-   - Check wallet: `GET /api/curry/wallet`
-   - Place order: `POST /api/curry/order`
-   - Verify token deducted
+**6. Curry Tokens**:
+- GET /api/curry/packages
+- POST /api/curry/purchase
+- GET /api/curry/wallet (check balance)
+- POST /api/curry/order
+- Verify token deducted
 
-7. **Upgrades**:
-   - Get prices: `GET /api/upgrades/prices`
-   - Apply upgrade: `POST /api/upgrades/apply`
-   - Verify upgrade created
+**7. Delivery Grouping**:
+- POST /api/meals/group (group tiffin + curry)
+- Verify same delivery_group_id
+- DELETE /api/meals/group/:id (ungroup)
 
-8. **Notifications**:
-   - Get notifications: `GET /api/notifications`
-   - Verify all events created notifications
-   - Mark as read: `POST /api/notifications/:id/read`
+**8. Upgrades**:
+- GET /api/upgrades/prices
+- POST /api/upgrades/apply
+- GET /api/upgrades/active
 
-### Postman Collection
+**9. Notifications**:
+- GET /api/notifications
+- Verify notifications created for all actions
+- POST /api/notifications/:id/read
 
-Create Postman collection with:
-- Environment variables for `BASE_URL` and `AUTH_TOKEN`
-- All endpoints documented above
-- Example requests and expected responses
-- Test scripts to verify response structure
+### Test Environment Variables
+
+**For local testing**: Use `.env` with local PostgreSQL and Firebase test project
 
 ---
 
-## Deployment Considerations
+## Production Deployment Considerations
 
-### Production Requirements
+### Environment Setup
 
-1. **Environment Variables**: Set all required env vars on hosting platform
-2. **Database**: PostgreSQL instance (e.g., Supabase, Railway, AWS RDS)
-3. **Firebase**: Production Firebase project with service account
-4. **Run migrations**: `npx prisma migrate deploy` (production-safe)
-5. **Start server**: `npm start`
+- **NODE_ENV**: Set to `production`
+- **Database**: PostgreSQL instance (Supabase, Railway, AWS RDS, etc.)
+- **Firebase**: Production Firebase project with service account
 
-### Environment-Specific Config
+### Pre-Deployment Steps
 
-- **Development**: Use `NODE_ENV=development`, verbose logging
-- **Production**: Use `NODE_ENV=production`, error logging only, enable CORS restrictions
+1. **Run production migration**:
+   ```bash
+   npm run prisma:migrate:prod
+   ```
 
-### Health Check
+2. **Generate Prisma client**:
+   ```bash
+   npm run prisma:generate
+   ```
 
-- Endpoint: `GET /health`
-- Returns: `{ "status": "ok", "timestamp": "..." }`
-- Use for load balancer health checks
+3. **Seed production data**:
+   ```bash
+   npm run seed
+   ```
+
+4. **Start server**:
+   ```bash
+   npm start
+   ```
+
+### Security Considerations
+
+- Ensure `.env` is never committed (in `.gitignore`)
+- Use strong DATABASE_URL password
+- Rotate Firebase service account keys periodically
+- Enable CORS only for trusted origins in production
+- Add rate limiting middleware (optional future enhancement)
+- Use HTTPS in production
+
+### Monitoring
+
+- Health check endpoint: `GET /health`
+- Log errors to external service (future: Sentry, LogRocket)
+- Monitor database connections
+- Track API response times
+
+---
+
+## File-by-File Implementation Checklist
+
+### Configuration Files
+- [ ] `package.json` - Dependencies and scripts
+- [ ] `.env.example` - Environment variable template
+- [ ] `.gitignore` - Ignore node_modules, .env, etc.
+- [ ] `prisma/schema.prisma` - Complete database schema (17 models)
+
+### Source Code Structure
+- [ ] `src/index.js` - Main server entry point
+- [ ] `src/config/firebase.js` - Firebase Admin SDK init
+- [ ] `src/utils/prisma.js` - Prisma client singleton
+- [ ] `src/utils/constants.js` - Enum definitions
+- [ ] `src/utils/timezone.js` - IST timezone helpers
+- [ ] `src/utils/responseFormatter.js` - Response helpers
+- [ ] `src/utils/AppError.js` - Custom error class
+- [ ] `src/middleware/auth.js` - Firebase token verification
+- [ ] `src/middleware/errorHandler.js` - Centralized error handler
+- [ ] `src/middleware/validate.js` - Validation middleware wrapper
+
+### Validators (express-validator schemas)
+- [ ] `src/middleware/validators/authValidators.js`
+- [ ] `src/middleware/validators/addressValidators.js`
+- [ ] `src/middleware/validators/subscriptionValidators.js`
+- [ ] `src/middleware/validators/mealValidators.js`
+- [ ] `src/middleware/validators/curryValidators.js`
+- [ ] `src/middleware/validators/upgradeValidators.js`
+
+### Routes
+- [ ] `src/routes/authRoutes.js`
+- [ ] `src/routes/addressRoutes.js`
+- [ ] `src/routes/mealPackageRoutes.js`
+- [ ] `src/routes/menuRoutes.js`
+- [ ] `src/routes/subscriptionRoutes.js`
+- [ ] `src/routes/mealRoutes.js`
+- [ ] `src/routes/deliveryRoutes.js`
+- [ ] `src/routes/curryRoutes.js`
+- [ ] `src/routes/upgradeRoutes.js`
+- [ ] `src/routes/notificationRoutes.js`
+
+### Controllers (10 controllers)
+- [ ] `src/controllers/authController.js`
+- [ ] `src/controllers/addressController.js`
+- [ ] `src/controllers/mealPackageController.js`
+- [ ] `src/controllers/menuController.js`
+- [ ] `src/controllers/subscriptionController.js`
+- [ ] `src/controllers/mealController.js`
+- [ ] `src/controllers/deliveryController.js`
+- [ ] `src/controllers/curryController.js`
+- [ ] `src/controllers/upgradeController.js`
+- [ ] `src/controllers/notificationController.js`
+
+### Services (10 services with business logic)
+- [ ] `src/services/authService.js`
+- [ ] `src/services/addressService.js`
+- [ ] `src/services/mealPackageService.js`
+- [ ] `src/services/menuService.js`
+- [ ] `src/services/subscriptionService.js`
+- [ ] `src/services/mealService.js` - **Critical: On-demand meal generation**
+- [ ] `src/services/deliveryService.js`
+- [ ] `src/services/curryService.js`
+- [ ] `src/services/upgradeService.js`
+- [ ] `src/services/notificationService.js`
+
+### Database
+- [ ] `prisma/seed.js` - Initial data seeding script
+
+### Total Files to Create
+**~50 files** across all layers
 
 ---
 
 ## Summary
 
-This backend system provides:
-- ✅ Complete meal subscription management
-- ✅ Curry token-based ordering system
-- ✅ Flexible delivery scheduling and grouping
-- ✅ Meal pausing with 8 PM deadline enforcement
-- ✅ Temporary upgrades (diet/cuisine)
-- ✅ In-app notifications
-- ✅ Firebase phone authentication
-- ✅ IST timezone support throughout
-- ✅ On-demand meal generation (optimized performance)
-- ✅ One active subscription per user (enforced)
-- ✅ 48-hour scheduling window (today + tomorrow)
+This implementation plan provides:
 
-**Total API Endpoints**: ~40 endpoints across 11 modules
-**Database Tables**: 17 tables with full relational integrity
-**External Dependencies**: Firebase Admin SDK only
+✅ **Complete backend system** for meal + curry subscription service
+✅ **Node.js with JavaScript only** (no TypeScript)
+✅ **Express.js** REST API with ~40 endpoints
+✅ **PostgreSQL + Prisma ORM** with 17-table schema
+✅ **Firebase phone authentication**
+✅ **IST timezone support** with 8 PM pause deadline
+✅ **On-demand meal generation** (optimized performance)
+✅ **48-hour scheduling window** (today + tomorrow)
+✅ **Curry token wallet system**
+✅ **Temporary upgrades** (diet/cuisine)
+✅ **Delivery grouping** (tiffin + curry together)
+✅ **Business logic enforcement** (one active subscription, primary address, etc.)
+✅ **Comprehensive error handling**
+✅ **Production-ready architecture**
+
+### Key Implementation Priorities
+
+1. **Core Infrastructure** (Day 1-2):
+   - Setup project structure, install dependencies
+   - Configure Prisma schema and run migrations
+   - Setup Firebase authentication
+   - Implement auth middleware and error handling
+
+2. **Essential APIs** (Day 3-5):
+   - Authentication endpoints
+   - Address management
+   - Meal packages and subscriptions
+   - Meal schedule with on-demand generation
+
+3. **Advanced Features** (Day 6-8):
+   - Pause/unpause with 8 PM deadline
+   - Curry token system
+   - Delivery grouping
+   - Upgrades
+   - Notifications
+
+4. **Testing & Polish** (Day 9-10):
+   - Seed data
+   - Manual testing
+   - Bug fixes
+   - Documentation
+
+### Critical Success Factors
+
+- **On-demand meal generation**: Meals created only when user views schedule or pauses
+- **Timezone handling**: All date logic uses IST, especially 8 PM pause deadline
+- **One active subscription**: Enforced at DB + application level
+- **Token management**: Proper increment/decrement of curry tokens
+- **Error handling**: Consistent error responses across all endpoints
+- **Validation**: All inputs validated with express-validator
+
+---
+
+**End of Implementation Plan**
+
+This document provides complete specifications for implementing the Vyanjo meal + curry subscription backend. All API endpoints, business logic rules, database schema, and implementation patterns are fully specified. Implementation agent can proceed with mechanical implementation following this plan exactly.
